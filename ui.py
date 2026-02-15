@@ -22,20 +22,29 @@ class StatusBar:
 
 
 class Button:
-    def __init__(self, x, y, w, h, text):
+    def __init__(self, x, y, w, h, text, enabled=True):
         self.rect = pygame.Rect(x, y, w, h)
         self.text = text
         self.font = pygame.font.SysFont(None, 26)
+        self.enabled = enabled
 
     def draw(self, screen):
-        pygame.draw.rect(screen, (70, 70, 200), self.rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
+        if self.enabled:
+            pygame.draw.rect(screen, (70, 70, 200), self.rect)
+            pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
+            txt_color = (255, 255, 255)
+        else:
+            pygame.draw.rect(screen, (100, 100, 100), self.rect) 
+            pygame.draw.rect(screen, (150, 150, 150), self.rect, 2)
+            txt_color = (180, 180, 180)
 
-        txt = self.font.render(self.text, True, (255, 255, 255))
+
+        txt = self.font.render(self.text, True, txt_color)
         screen.blit(txt, txt.get_rect(center=self.rect.center))
 
     def clicked(self, event):
         return (
-            event.type == pygame.MOUSEBUTTONDOWN
+            self.enabled
+            and event.type == pygame.MOUSEBUTTONDOWN
             and self.rect.collidepoint(event.pos)
         )

@@ -15,20 +15,19 @@ student = Student()
 
 # Status bars
 bars = [
-    StatusBar(30, 80, 220, 20, "Knowledge"),
-    StatusBar(30, 120, 220, 20, "Sleep"),
-    StatusBar(30, 160, 220, 20, "Health"),
-    StatusBar(30, 200, 220, 20, "Stress"),
-    StatusBar(30, 240, 220, 20, "Motivation"),
+    StatusBar(30, 60, 124, 20, "Knowledge"),
+    StatusBar(184, 60, 124, 20, "Sleep"),
+    StatusBar(338, 60, 124, 20, "Health"),
+    StatusBar(492, 60, 124, 20, "Stress"),
+    StatusBar(646, 60, 124, 20, "Motivation"),
 ]
 
 # Buttons
-study_btn = Button(350, 450, 120, 40, "Study")
-sleep_btn = Button(500, 450, 120, 40, "Sleep")
-relax_btn = Button(650, 450, 120, 40, "Relax")
-attend_class_btn = Button(350, 500, 120, 40, "Attend Class")
-drink_coffee_btn = Button(500, 500, 120, 40, "Drink Coffee")
-eat_btn = Button(650, 500, 120, 40, "Eat")
+study_btn = Button(30, 500, 124, 40, "Study")
+sleep_btn = Button(184, 500, 124, 40, "Sleep")
+relax_btn = Button(338, 500, 124, 40, "Relax")
+drink_coffee_btn = Button(492, 500, 124, 40, "Drink Coffee")
+eat_btn = Button(646, 500, 124, 40, "Eat")
 
 font = pygame.font.SysFont(None, 28)
 message_font = pygame.font.SysFont(None, 24)
@@ -36,6 +35,13 @@ messages = []
 
 running = True
 while running:
+    # Update button states
+    study_btn.enabled = student.action_status['study']
+    sleep_btn.enabled = student.action_status['sleep']
+    relax_btn.enabled = student.action_status['relax']
+    eat_btn.enabled = student.action_status['eat']
+    drink_coffee_btn.enabled = student.action_status['coffee']
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -50,9 +56,6 @@ while running:
         if relax_btn.clicked(event):
             new_messages.extend(student.take_break())
 
-        if attend_class_btn.clicked(event):
-            new_messages.extend(student.attend_class())
-
         if drink_coffee_btn.clicked(event):
             new_messages.extend(student.drink_coffee())
 
@@ -66,8 +69,8 @@ while running:
 
     screen.fill((30, 30, 30))
 
-    title = font.render("Caffeine & Chaos", True, (255, 255, 255))
-    screen.blit(title, (30, 20))
+    # title = font.render("Caffeine & Chaos", True, (255, 255, 255))
+    # screen.blit(title, (30, 20))
 
     # Display messages
     y_offset = 280
@@ -88,7 +91,6 @@ while running:
     study_btn.draw(screen)
     sleep_btn.draw(screen)
     relax_btn.draw(screen)
-    attend_class_btn.draw(screen)
     drink_coffee_btn.draw(screen)
     eat_btn.draw(screen)
 

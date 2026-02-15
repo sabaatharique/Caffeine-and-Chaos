@@ -13,6 +13,25 @@ class Student:
         # Internal tracking
         self.consecutive_stress_days = 0
 
+        # Action enabled
+        self.action_status = {
+            'study': True,
+            'sleep': True,
+            'relax': True,
+            'eat': True,
+            'coffee': True,
+            'attend_class': True,
+        }
+        self.update_action_status() # Initial update
+
+    def update_action_status(self):
+        self.action_status['study'] = self.sleep > 0
+        self.action_status['sleep'] = self.sleep < 100
+        self.action_status['relax'] = self.stress > 0 or self.motivation < 100
+        self.action_status['eat'] = self.health < 100
+        self.action_status['coffee'] = self.sleep < 100 and self.health > 0
+        # self.action_status['attend_class'] = self.sleep > 0
+
     def clamp(self):
         messages = []
         # Keep values within limits
@@ -22,6 +41,7 @@ class Student:
         self.stress = max(0, min(100, self.stress))
         self.motivation = max(0, min(100, self.motivation))
         self.attendance = max(0, min(100, self.attendance))
+
 
         if self.knowledge < 10:
             messages.append("Warning: Knowledge is critically low!")
@@ -33,6 +53,8 @@ class Student:
             messages.append("Warning: Motivation is critically low!")
         if self.stress > 90:
             messages.append("Warning: Stress is critically high!")
+        
+        self.update_action_status()
         return messages
 
     def end_of_day(self):
@@ -46,7 +68,7 @@ class Student:
 
     def attend_class(self, course_difficulty=1.0):
         messages = []
-        if self.sleep == 0:
+        if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
             return messages
         self.knowledge += 2 * course_difficulty
@@ -59,7 +81,7 @@ class Student:
 
     def study(self, hours=2.0):
         messages = []
-        if self.sleep == 0:
+        if not self.action_status['study']:
             messages.append("You are too tired to study.")
             return messages
         # Study efficiency depends on current state
@@ -74,8 +96,8 @@ class Student:
 
     def rest(self, hours=1.0):
         messages = []
-        if self.sleep >= 100:
-            messages.append("You are fully rested.")
+        if not self.action_status['sleep']:
+            messages.append("You are well rested.")
             return messages
         self.sleep += hours * 10
         self.stress -= hours * 5
@@ -87,8 +109,8 @@ class Student:
     
     def eat(self):
         messages = []
-        if self.health >= 100:
-            messages.append("You are already at full health.")
+        if not self.action_status['eat']:
+            messages.append("You are at nearly full health.")
             return messages
         self.health += 10
         self.stress -= 5
@@ -98,11 +120,11 @@ class Student:
 
     def drink_coffee(self):
         messages = []
-        if self.health < 10:
-            messages.append("Your health is too low to drink coffee.")
-            return messages
-        if self.sleep >= 100:
-            messages.append("You are already wide awake.")
+        if not self.action_status['coffee']:
+            if self.health < 10:
+                 messages.append("Your health is too low to drink coffee.")
+            else:
+                 messages.append("You are already wide awake.")
             return messages
         self.sleep += 10
         self.health -= 7
@@ -113,7 +135,7 @@ class Student:
 
     def take_break(self, hours=1.0):
         messages = []
-        if self.stress == 0 and self.motivation == 100:
+        if not self.action_status['relax']:
             messages.append("You are perfectly relaxed and motivated.")
             return messages
         self.stress -= hours * 8
