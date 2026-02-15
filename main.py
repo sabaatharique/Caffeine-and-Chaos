@@ -2,6 +2,7 @@ import pygame
 import sys
 from student import Student
 from ui import StatusBar, Button
+from screens import main_menu, game_screen
 
 pygame.init()
 
@@ -13,24 +14,36 @@ clock = pygame.time.Clock()
 
 student = Student()
 
+# Game states
+MAIN_MENU = "main_menu"
+GAME_SCREEN = "game_screen"
+current_screen_state = MAIN_MENU
+
+# Load images
+main_bg = pygame.image.load("assets/images/main.jpg")
+study_bg = pygame.image.load("assets/images/study.jpg")
+
+button_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
+
 # Status bars
 bars = [
-    StatusBar(30, 60, 124, 20, "Knowledge"),
-    StatusBar(184, 60, 124, 20, "Sleep"),
-    StatusBar(338, 60, 124, 20, "Health"),
-    StatusBar(492, 60, 124, 20, "Stress"),
-    StatusBar(646, 60, 124, 20, "Motivation"),
+    StatusBar(30, 60, 124, 20, "Knowledge", message_font),
+    StatusBar(184, 60, 124, 20, "Sleep", message_font),
+    StatusBar(338, 60, 124, 20, "Health", message_font),
+    StatusBar(492, 60, 124, 20, "Stress", message_font),
+    StatusBar(646, 60, 124, 20, "Motivation", message_font),
 ]
 
 # Buttons
-study_btn = Button(30, 500, 124, 40, "Study")
-sleep_btn = Button(184, 500, 124, 40, "Sleep")
-relax_btn = Button(338, 500, 124, 40, "Relax")
-drink_coffee_btn = Button(492, 500, 124, 40, "Drink Coffee")
-eat_btn = Button(646, 500, 124, 40, "Eat")
+start_btn = Button(WIDTH - 154, HEIGHT - 70, 124, 40, "Start", button_font)
+study_btn = Button(30, 520, 124, 40, "Study", button_font)
+sleep_btn = Button(184, 520, 124, 40, "Sleep", button_font)
+relax_btn = Button(338, 520, 124, 40, "Relax", button_font)
+drink_coffee_btn = Button(492, 520, 124, 40, "Drink Coffee", button_font)
+eat_btn = Button(646, 520, 124, 40, "Eat", button_font)
 
-font = pygame.font.SysFont(None, 28)
-message_font = pygame.font.SysFont(None, 24)
+game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 messages = []
 
 running = True
@@ -46,53 +59,36 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-        new_messages = []
-        if study_btn.clicked(event):
-            new_messages.extend(student.study())
+        if current_screen_state == MAIN_MENU:
+            if start_btn.clicked(event):
+                current_screen_state = GAME_SCREEN
+        elif current_screen_state == GAME_SCREEN:
+            new_messages = []
+            if study_btn.clicked(event):
+                new_messages.extend(student.study())
 
-        if sleep_btn.clicked(event):
-            new_messages.extend(student.rest())
+            if sleep_btn.clicked(event):
+                new_messages.extend(student.rest())
 
-        if relax_btn.clicked(event):
-            new_messages.extend(student.take_break())
+            if relax_btn.clicked(event):
+                new_messages.extend(student.take_break())
 
-        if drink_coffee_btn.clicked(event):
-            new_messages.extend(student.drink_coffee())
+            if drink_coffee_btn.clicked(event):
+                new_messages.extend(student.drink_coffee())
 
-        if eat_btn.clicked(event):
-            new_messages.extend(student.eat())
+            if eat_btn.clicked(event):
+                new_messages.extend(student.eat())
 
-
-        if new_messages:
-            messages.extend(new_messages)
-            messages = messages[-5:] # Keep last 5 messages
+            if new_messages:
+                messages.extend(new_messages)
+                messages = messages[-5:]
 
     screen.fill((30, 30, 30))
 
-    # title = font.render("Caffeine & Chaos", True, (255, 255, 255))
-    # screen.blit(title, (30, 20))
-
-    # Display messages
-    y_offset = 280
-    for msg in messages:
-        msg_surface = message_font.render(msg, True, (255, 255, 0)) # Yellow messages
-        screen.blit(msg_surface, (30, y_offset))
-        y_offset += 25
-
-
-    # Draw bars
-    bars[0].draw(screen, student.knowledge)
-    bars[1].draw(screen, student.sleep)
-    bars[2].draw(screen, student.health)
-    bars[3].draw(screen, student.stress)
-    bars[4].draw(screen, student.motivation)
-
-    # Draw buttons
-    study_btn.draw(screen)
-    sleep_btn.draw(screen)
-    relax_btn.draw(screen)
-    drink_coffee_btn.draw(screen)
-    eat_btn.draw(screen)
+    if current_screen_state == MAIN_MENU:
+        main_menu(screen, main_bg, start_btn)
+    elif current_screen_state == GAME_SCREEN:
+        game_screen(screen, study_bg, student, bars, game_buttons, messages, message_font)
 
 
     pygame.display.flip()
@@ -100,4 +96,3 @@ while running:
 
 pygame.quit()
 sys.exit()
-

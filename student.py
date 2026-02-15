@@ -45,12 +45,22 @@ class Student:
 
         if self.knowledge < 10:
             messages.append("Warning: Knowledge is critically low!")
+        if self.knowledge == 100:
+            messages.append("Knowledge maxxed out!")
+
         if self.sleep < 10:
             messages.append("Warning: Sleep is critically low!")
+        if self.sleep == 100:
+            messages.append("Sleep maxxed out!")
+
         if self.health < 10:
             messages.append("Warning: Health is critically low!")
+        if self.health == 100:
+            messages.append("Health maxxed out!")
+        
         if self.motivation < 10:
             messages.append("Warning: Motivation is critically low!")
+
         if self.stress > 90:
             messages.append("Warning: Stress is critically high!")
         
@@ -87,8 +97,8 @@ class Student:
         # Study efficiency depends on current state
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation)) / 400
         self.knowledge += hours * 3 * efficiency
-        self.sleep -= hours * 8
-        self.stress += hours * 5
+        self.sleep -= hours * 4
+        self.stress += hours * 3
         self.health -= hours * 2
 
         messages.extend(self.clamp())
