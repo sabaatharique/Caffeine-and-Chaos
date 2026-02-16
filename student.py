@@ -97,9 +97,9 @@ class Student:
         # Study efficiency depends on current state
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation)) / 400
         self.knowledge += hours * 3 * efficiency
-        self.sleep -= hours * 4
-        self.stress += hours * 3
-        self.health -= hours * 2
+        self.sleep -= hours * 8
+        self.stress += hours * 10
+        self.health -= hours * 5
 
         messages.extend(self.clamp())
         return messages
@@ -153,6 +153,43 @@ class Student:
 
         messages.extend(self.clamp())
         return messages
+
+    def max_hours(self, action):
+        """Return the max whole hours the player can perform *action*
+        before any stat would be clamped (hit 0 or 100)."""
+        import math
+        limits = []
+
+        if action == 'study':
+            # sleep  -= hours * 4  →  max before 0
+            if self.sleep > 0:
+                limits.append(self.sleep / 8)
+            # health -= hours * 2  →  max before 0
+            if self.health > 0:
+                limits.append(self.health / 5)
+            # stress += hours * 3  →  max before 100
+            if self.stress < 100:
+                limits.append((100 - self.stress) / 10)
+
+        elif action == 'sleep':
+            # sleep  += hours * 10 →  max before 100
+            if self.sleep < 100:
+                limits.append((100 - self.sleep) / 10)
+            # knowledge -= hours * 2 → max before 0
+            if self.knowledge > 0:
+                limits.append(self.knowledge / 2)
+
+        elif action == 'relax':
+            # stress -= hours * 8  →  max before 0
+            if self.stress > 0:
+                limits.append(self.stress / 8)
+            # motivation += hours * 5 → max before 100
+            if self.motivation < 100:
+                limits.append((100 - self.motivation) / 5)
+
+        if not limits:
+            return 0
+        return max(1, math.floor(min(limits)))
 
     def burnout_check(self):
         # Return true if burnout occurs
