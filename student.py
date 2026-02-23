@@ -155,19 +155,16 @@ class Student:
         return messages
 
     def max_hours(self, action):
-        """Return the max whole hours the player can perform *action*
-        before any stat would be clamped (hit 0 or 100)."""
-        import math
         limits = []
 
         if action == 'study':
-            # sleep  -= hours * 4  →  max before 0
+            # sleep  -= hours * 8  →  max before 0
             if self.sleep > 0:
                 limits.append(self.sleep / 8)
-            # health -= hours * 2  →  max before 0
+            # health -= hours * 5  →  max before 0
             if self.health > 0:
                 limits.append(self.health / 5)
-            # stress += hours * 3  →  max before 100
+            # stress += hours * 10 →  max before 100
             if self.stress < 100:
                 limits.append((100 - self.stress) / 10)
 
@@ -188,8 +185,9 @@ class Student:
                 limits.append((100 - self.motivation) / 5)
 
         if not limits:
-            return 0
-        return max(1, math.floor(min(limits)))
+            return 0.0
+        # Return the precise float limit (no floor), minimum 1 minute (1/60 h)
+        return max(1 / 60, min(limits))
 
     def burnout_check(self):
         # Return true if burnout occurs

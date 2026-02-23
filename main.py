@@ -46,7 +46,9 @@ study_bg = pygame.image.load("assets/images/study.jpg")
 
 button_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
 message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
-input_box = InputBox(message_font)
+input_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+input_box = InputBox(message_font, 
+input_font)
 pending_action = None  # tracks which action is waiting for hour input
 
 # Status bars
@@ -123,21 +125,20 @@ while running:
             else:
                 # Open the input prompt for actions that need hours
                 remaining_hours = DAY_END - time_of_day
-                remaining_whole = int(remaining_hours)
 
                 if study_btn.clicked(event):
                     pending_action = 'study'
-                    cap = min(student.max_hours('study'), remaining_whole)
+                    cap = min(student.max_hours('study'), remaining_hours)
                     input_box.open('study', cap)
 
                 if sleep_btn.clicked(event):
                     pending_action = 'sleep'
-                    cap = min(student.max_hours('sleep'), remaining_whole)
+                    cap = min(student.max_hours('sleep'), remaining_hours)
                     input_box.open('sleep', cap)
 
                 if relax_btn.clicked(event):
                     pending_action = 'relax'
-                    cap = min(student.max_hours('relax'), remaining_whole)
+                    cap = min(student.max_hours('relax'), remaining_hours)
                     input_box.open('relax', cap)
 
                 # Instant actions (fixed durations)
