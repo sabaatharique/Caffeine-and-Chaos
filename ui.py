@@ -237,3 +237,90 @@ class InputBox:
             hint = "Tab to switch field    Enter to confirm    Esc to cancel"
             hint_surf = self.smallfont.render(hint, True, (140, 140, 180))
             screen.blit(hint_surf, (box_x + 20, box_y + 140))
+
+
+class NumberBox:
+    def __init__(self, font, smallfont):
+        self.font = font
+        self.smallfont = smallfont
+        self.active = False
+        self.prompt_text = ""
+        self._text = ""
+        self.result = None
+        self._error = ""
+        self._max = 999
+
+    def open(self, prompt: str, max_value: int = 999):
+        self.active = True
+        self._text = ""
+        self.result = None
+        self._error = ""
+        self._max = max_value
+        self.prompt_text = prompt
+
+    def handle_event(self, event):
+        if not self.active:
+            return None
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.active = False
+                self._error = ""
+                return None
+            elif event.key == pygame.K_RETURN:
+                if not self._text:
+                    self._error = "Enter a number first"
+                    return None
+                val = int(self._text)
+                if val <= 0:
+                    self._error = "Must be at least 1"
+                elif val > self._max:
+                    self._error = f"Max is {self._max}"
+                else:
+                    self.result = val
+                    self.active = False
+                    self._error = ""
+                    return self.result
+            elif event.key == pygame.K_BACKSPACE:
+                self._text = self._text[:-1]
+                self._error = ""
+            elif event.unicode.isdigit() and len(self._text) < 3:
+                self._text += event.unicode
+                self._error = ""
+        return None
+
+    def draw(self, screen):
+        if not self.active:
+            return
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        screen.blit(overlay, (0, 0))
+
+        box_w, box_h = 360, 150
+        box_x = (screen.get_width() - box_w) // 2
+        box_y = (screen.get_height() - box_h) // 2
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+
+        pygame.draw.rect(screen, (40, 40, 60), box_rect, border_radius=10)
+        pygame.draw.rect(screen, (255, 255, 255), box_rect, 2, border_radius=10)
+
+        prompt_surf = self.font.render(self.prompt_text, True, (255, 255, 255))
+        screen.blit(prompt_surf, (box_x + 20, box_y + 18))
+
+        field_rect = pygame.Rect(box_x + 20, box_y + 58, box_w - 40, 44)
+        pygame.draw.rect(screen, (55, 55, 80), field_rect, border_radius=6)
+        pygame.draw.rect(screen, (255, 220, 80), field_rect, 2, border_radius=6)
+
+        if self._text:
+            val_surf = self.font.render(self._text, True, (255, 255, 255))
+            screen.blit(val_surf, val_surf.get_rect(center=field_rect.center))
+        else:
+            ph = self.font.render("0", True, (100, 100, 130))
+            screen.blit(ph, ph.get_rect(center=field_rect.center))
+
+        if self._error:
+            err_surf = self.font.render(self._error, True, (255, 100, 100))
+            screen.blit(err_surf, (box_x + 20, box_y + 112))
+        else:
+            hint_surf = self.smallfont.render("Enter to confirm    Esc to cancel", True, (140, 140, 180))
+            screen.blit(hint_surf, (box_x + 20, box_y + 118))
+

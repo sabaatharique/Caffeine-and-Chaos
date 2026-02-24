@@ -8,10 +8,36 @@ class Student:
         self.motivation = 60
 
         # Academic tracking
-        self.attendance = 0   
+        self.attendance = 0
 
         # Internal tracking
         self.consecutive_stress_days = 0
+        self.burnout_days_remaining = 5
+
+        # Action rates 
+        self.study_knowledge_rate =  5    
+        self.study_sleep_rate =  8    
+        self.study_stress_rate = 10   
+        self.study_health_rate = 5   
+
+        self.rest_sleep_rate = 10   
+        self.rest_stress_rate = 5    
+        self.rest_health_rate = 3    
+        self.rest_knowledge_rate = 1    
+
+        self.relax_stress_rate = 8    
+        self.relax_motivation_rate = 5    
+
+        self.eat_health_gain = 10    
+        self.eat_stress_reduction = 5    
+
+        self.coffee_sleep_gain = 10    
+        self.coffee_health_loss = 7    
+        self.coffee_stress_gain = 3    
+
+        self.class_knowledge_rate = 2     
+        self.class_stress_rate = 3     
+        self.class_sleep_loss = 5     
 
         # Action enabled
         self.action_status = {
@@ -22,12 +48,12 @@ class Student:
             'coffee': True,
             'attend_class': True,
         }
-        self.update_action_status() # Initial update
+        self.update_action_status()  # Initial update
 
     def update_action_status(self):
         self.action_status['study'] = self.sleep > 0
         self.action_status['sleep'] = self.sleep < 100
-        self.action_status['relax'] = self.stress > 0 or self.motivation < 100
+        self.action_status['relax'] = True
         self.action_status['eat'] = self.health < 100
         self.action_status['coffee'] = self.sleep < 100 and self.health > 0
         # self.action_status['attend_class'] = self.sleep > 0
@@ -68,22 +94,34 @@ class Student:
         return messages
 
     def end_of_day(self):
+        messages = []
+
         # Daily changes in state
         if self.stress > 70:
             self.consecutive_stress_days += 1
         else:
             self.consecutive_stress_days = 0
 
-        return self.clamp()
+        if self.burnout_days_remaining > 0:
+            self.burnout_days_remaining -= 1
+            if self.burnout_days_remaining == 0:
+                messages.append("You have recovered from burnout!")
+
+        if self.burnout_check():
+            self.trigger_burnout()
+            messages.append("Burnout! Your stats have taken a hit.")
+
+        messages.extend(self.clamp())
+        return messages
 
     def attend_class(self, course_difficulty=1.0):
         messages = []
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
             return messages
-        self.knowledge += 2 * course_difficulty
-        self.stress += 3 * course_difficulty
-        self.sleep -= 5
+        self.knowledge += self.class_knowledge_rate * course_difficulty
+        self.stress += self.class_stress_rate * course_difficulty
+        self.sleep -= self.class_sleep_loss
         self.attendance += 1
 
         messages.extend(self.clamp())
@@ -96,10 +134,10 @@ class Student:
             return messages
         # Study efficiency depends on current state
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation)) / 400
-        self.knowledge += hours * 3 * efficiency
-        self.sleep -= hours * 8
-        self.stress += hours * 10
-        self.health -= hours * 5
+        self.knowledge += hours * self.study_knowledge_rate * efficiency
+        self.sleep -= hours * self.study_sleep_rate
+        self.stress += hours * self.study_stress_rate
+        self.health -= hours * self.study_health_rate
 
         messages.extend(self.clamp())
         return messages
@@ -109,10 +147,10 @@ class Student:
         if not self.action_status['sleep']:
             messages.append("You are well rested.")
             return messages
-        self.sleep += hours * 10
-        self.stress -= hours * 5
-        self.health += hours * 3
-        self.knowledge -= hours * 2
+        self.sleep += hours * self.rest_sleep_rate
+        self.stress -= hours * self.rest_stress_rate
+        self.health += hours * self.rest_health_rate
+        self.knowledge -= hours * self.rest_knowledge_rate
 
         messages.extend(self.clamp())
         return messages
@@ -122,8 +160,8 @@ class Student:
         if not self.action_status['eat']:
             messages.append("You are at nearly full health.")
             return messages
-        self.health += 10
-        self.stress -= 5
+        self.health += self.eat_health_gain
+        self.stress -= self.eat_stress_reduction
 
         messages.extend(self.clamp())
         return messages
@@ -136,59 +174,61 @@ class Student:
             else:
                  messages.append("You are already wide awake.")
             return messages
-        self.sleep += 10
-        self.health -= 7
-        self.stress += 3
+        self.sleep += self.coffee_sleep_gain
+        self.health -= self.coffee_health_loss
+        self.stress += self.coffee_stress_gain
 
         messages.extend(self.clamp())
         return messages
 
     def take_break(self, hours=1.0):
         messages = []
-        if not self.action_status['relax']:
-            messages.append("You are perfectly relaxed and motivated.")
-            return messages
-        self.stress -= hours * 8
-        self.motivation += hours * 5
+        self.stress -= hours * self.relax_stress_rate
+        self.motivation += hours * self.relax_motivation_rate
 
         messages.extend(self.clamp())
         return messages
 
     def max_hours(self, action):
-        limits = []
+        limits = [24.0]
 
         if action == 'study':
-            # sleep  -= hours * 8  →  max before 0
+            # sleep  -= hours * study_sleep_rate   →  max before 0
             if self.sleep > 0:
-                limits.append(self.sleep / 8)
-            # health -= hours * 5  →  max before 0
+                limits.append(self.sleep / self.study_sleep_rate)
+            # health -= hours * study_health_rate  →  max before 0
             if self.health > 0:
-                limits.append(self.health / 5)
-            # stress += hours * 10 →  max before 100
+                limits.append(self.health / self.study_health_rate)
+            # stress += hours * study_stress_rate  →  max before 100
             if self.stress < 100:
-                limits.append((100 - self.stress) / 10)
+                limits.append((100 - self.stress) / self.study_stress_rate)
 
         elif action == 'sleep':
-            # sleep  += hours * 10 →  max before 100
+            # sleep  += hours * rest_sleep_rate    →  max before 100
             if self.sleep < 100:
-                limits.append((100 - self.sleep) / 10)
-            # knowledge -= hours * 2 → max before 0
+                limits.append((100 - self.sleep) / self.rest_sleep_rate)
+            # knowledge -= hours * rest_knowledge_rate → max before 0
             if self.knowledge > 0:
-                limits.append(self.knowledge / 2)
+                limits.append(self.knowledge / self.rest_knowledge_rate)
 
         elif action == 'relax':
-            # stress -= hours * 8  →  max before 0
-            if self.stress > 0:
-                limits.append(self.stress / 8)
-            # motivation += hours * 5 → max before 100
-            if self.motivation < 100:
-                limits.append((100 - self.motivation) / 5)
+            # No limits for relaxing
+            pass
 
-        if not limits:
-            return 0.0
         # Return the precise float limit (no floor), minimum 1 minute (1/60 h)
         return max(1 / 60, min(limits))
 
     def burnout_check(self):
         # Return true if burnout occurs
         return self.consecutive_stress_days >= 5
+
+    def trigger_burnout(self):
+        self.knowledge -= 5
+        self.motivation -= 20
+        self.health -= 10
+        self.stress += 10
+        self.sleep -= 15
+
+        self.burnout_days_remaining = 3
+        self.consecutive_stress_days = 0
+        self.clamp()
