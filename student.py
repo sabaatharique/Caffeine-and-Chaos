@@ -1,11 +1,18 @@
+import math
+
 class Student:
     def __init__(self):
         # Status bars
-        self.knowledge = 50
+        self.knowledge = 30
         self.sleep = 70
         self.health = 80
         self.stress = 30
         self.motivation = 60
+
+        # Hunger tracking
+        self.hours_since_last_meal = 0.0  # resets to 0 when eating
+        self.hunger_decay_rate = 1.5      # base HP lost per half-life period
+        self.hunger_half_life = 4.0       # hours until decay doubles
 
         # Academic tracking
         self.attendance = 0
@@ -155,6 +162,28 @@ class Student:
         messages.extend(self.clamp())
         return messages
     
+    def apply_hunger_decay(self, elapsed_hours):
+        """Apply exponential health decay based on how long since last meal.
+        Penalty = rate * (2^(total_hours / half_life) - 1)
+        This is nearly zero for the first couple hours but ramps up fast.
+        """
+        old_total = self.hours_since_last_meal
+        new_total = old_total + elapsed_hours
+        self.hours_since_last_meal = new_total
+
+        penalty_before = self.hunger_decay_rate * (math.pow(2, old_total / self.hunger_half_life) - 1)
+        penalty_after  = self.hunger_decay_rate * (math.pow(2, new_total / self.hunger_half_life) - 1)
+        delta = penalty_after - penalty_before  # incremental loss this tick
+
+        messages = []
+        if delta > 0:
+            self.health -= delta
+            if new_total >= 6:
+                messages.append(f"You're starving!")
+            elif new_total >= 3:
+                messages.append(f"You're getting hungry...")
+        return messages
+
     def eat(self):
         messages = []
         if not self.action_status['eat']:
@@ -162,6 +191,7 @@ class Student:
             return messages
         self.health += self.eat_health_gain
         self.stress -= self.eat_stress_reduction
+        self.hours_since_last_meal = 0.0  # reset hunger timer
 
         messages.extend(self.clamp())
         return messages

@@ -48,14 +48,19 @@ def replay_days(student, actions, n: int, start_day: int):
         current_day += 1
         for action, hours in actions:
             if action == 'study' and student.action_status['study']:
+                msgs.extend(student.apply_hunger_decay(hours))
                 msgs.extend(student.study(hours=hours))
             elif action == 'sleep' and student.action_status['sleep']:
+                msgs.extend(student.apply_hunger_decay(hours))
                 msgs.extend(student.rest(hours=hours))
             elif action == 'relax' and student.action_status['relax']:
+                msgs.extend(student.apply_hunger_decay(hours))
                 msgs.extend(student.take_break(hours=hours))
             elif action == 'eat' and student.action_status['eat']:
+                msgs.extend(student.apply_hunger_decay(0.5))
                 msgs.extend(student.eat())
             elif action == 'coffee' and student.action_status['coffee']:
+                msgs.extend(student.apply_hunger_decay(0.25))
                 msgs.extend(student.drink_coffee())
         day_msgs = student.end_of_day()
         msgs.extend(day_msgs)
@@ -153,6 +158,7 @@ while running:
             elif input_box.active:
                 hours = input_box.handle_event(event)
                 if hours is not None:
+                    new_messages.extend(student.apply_hunger_decay(hours))
                     if pending_action == 'study':
                         new_messages.extend(student.study(hours=hours))
                     elif pending_action == 'sleep':
@@ -196,6 +202,7 @@ while running:
 
                 # Instant actions (fixed durations)
                 if drink_coffee_btn.clicked(event):
+                    new_messages.extend(student.apply_hunger_decay(0.25))
                     new_messages.extend(student.drink_coffee())
                     record_action('coffee', 0.25)
                     time_of_day += 0.25  # 15 minutes
@@ -213,6 +220,7 @@ while running:
                         current_screen_state = DAY_END_SCREEN
 
                 if eat_btn.clicked(event):
+                    new_messages.extend(student.apply_hunger_decay(0.5))
                     new_messages.extend(student.eat())
                     record_action('eat', 0.5)
                     time_of_day += 0.5  # 30 minutes

@@ -14,8 +14,11 @@ class StatusBar:
         fill_rect = pygame.Rect(
             self.rect.x, self.rect.y, fill_width, self.rect.height
         )
-        pygame.draw.rect(screen, (0, 180, 0), fill_rect)
-
+        if self.label == 'Stress':
+            bar_color = (255, 0, 0) if value > 70 else (0, 180, 0)
+        else:
+            bar_color = (255, 0, 0) if value < 30 else (0, 180, 0)
+        pygame.draw.rect(screen, bar_color, fill_rect)
         pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
 
         text = self.font.render(f"{self.label}: {int(value)}", True, (255, 255, 255))
@@ -131,7 +134,17 @@ class InputBox:
             elif event.unicode.isdigit():
                 self._error = ""
                 self._type_digit(event.unicode)
-
+        
+        if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = event.pos
+                
+                if self.h_rect.collidepoint(mouse_pos):
+                    self._focus = self.FIELD_H
+                    self._error = ""
+                
+                elif self.m_rect.collidepoint(mouse_pos):
+                    self._focus = self.FIELD_M
+                    self._error = ""
         return None
 
     def _type_digit(self, ch: str):
@@ -190,19 +203,19 @@ class InputBox:
         field_h = 44
 
         # Hours field
-        h_rect = pygame.Rect(box_x + 20, field_y, 110, field_h)
+        self.h_rect = pygame.Rect(box_x + 20, field_y, 110, field_h)
         h_active = self._focus == self.FIELD_H
         h_border_color = (255, 220, 80) if h_active else (140, 140, 200)
-        pygame.draw.rect(screen, (55, 55, 80), h_rect, border_radius=6)
-        pygame.draw.rect(screen, h_border_color, h_rect, 2, border_radius=6)
+        pygame.draw.rect(screen, (55, 55, 80), self.h_rect, border_radius=6)
+        pygame.draw.rect(screen, h_border_color, self.h_rect, 2, border_radius=6)
 
         if not self._h_text:
             # Placeholder
             ph = self.font.render("HH", True, (100, 100, 130))
-            screen.blit(ph, ph.get_rect(center=h_rect.center))
+            screen.blit(ph, ph.get_rect(center=self.h_rect.center))
         else:
             h_surf = self.font.render(self._h_text, True, (255, 255, 255))
-            screen.blit(h_surf, h_surf.get_rect(center=h_rect.center))
+            screen.blit(h_surf, h_surf.get_rect(center=self.h_rect.center))
 
         # Colon separator
         colon_surf = self.font.render(":", True, (200, 200, 200))
@@ -210,24 +223,24 @@ class InputBox:
         screen.blit(colon_surf, colon_surf.get_rect(centery=field_y + field_h // 2, x=colon_x))
 
         # Minutes field
-        m_rect = pygame.Rect(colon_x + 22, field_y, 110, field_h)
+        self.m_rect = pygame.Rect(colon_x + 22, field_y, 110, field_h)
         m_active = self._focus == self.FIELD_M
         m_border_color = (255, 220, 80) if m_active else (140, 140, 200)
-        pygame.draw.rect(screen, (55, 55, 80), m_rect, border_radius=6)
-        pygame.draw.rect(screen, m_border_color, m_rect, 2, border_radius=6)
+        pygame.draw.rect(screen, (55, 55, 80), self.m_rect, border_radius=6)
+        pygame.draw.rect(screen, m_border_color, self.m_rect, 2, border_radius=6)
 
         if not self._m_text:
             ph = self.font.render("MM", True, (100, 100, 130))
-            screen.blit(ph, ph.get_rect(center=m_rect.center))
+            screen.blit(ph, ph.get_rect(center=self.m_rect.center))
         else:
             m_surf = self.font.render(self._m_text, True, (255, 255, 255))
-            screen.blit(m_surf, m_surf.get_rect(center=m_rect.center))
+            screen.blit(m_surf, m_surf.get_rect(center=self.m_rect.center))
 
         # Labels under fields
         h_lbl = self.font.render("Hours", True, (160, 160, 200))
-        screen.blit(h_lbl, h_lbl.get_rect(centerx=h_rect.centerx, y=field_y + field_h + 4))
+        screen.blit(h_lbl, h_lbl.get_rect(centerx=self.h_rect.centerx, y=field_y + field_h + 4))
         m_lbl = self.font.render("Minutes", True, (160, 160, 200))
-        screen.blit(m_lbl, m_lbl.get_rect(centerx=m_rect.centerx, y=field_y + field_h + 4))
+        screen.blit(m_lbl, m_lbl.get_rect(centerx=self.m_rect.centerx, y=field_y + field_h + 4))
 
         # Error or hint
         if self._error:
