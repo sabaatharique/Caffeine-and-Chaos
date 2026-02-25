@@ -1,8 +1,9 @@
 import pygame
 import sys
 from student import Student
-from ui import StatusBar, Button, InputBox, NumberBox
+from ui import StatusBar, Button, InputBox, NumberBox, AlertBox
 from screens import main_menu, game_screen
+from events import wifi_failure_event
 
 pygame.init()
 
@@ -36,41 +37,124 @@ print(f"Time of day: {format_time(time_of_day)}")
 student = Student()
 
 day_actions = []
+# Outages for the current live day (list of {"start": h, "duration": h})
+daily_outages = wifi_failure_event()
 
 def record_action(action: str, hours: float):
     day_actions.append((action, hours))
 
-def replay_days(student, actions, n: int, start_day: int):
-    msgs = []
-    current_day = start_day
-    burnout_occurred = False
-    for _ in range(n):
-        current_day += 1
-        for action, hours in actions:
-            if action == 'study' and student.action_status['study']:
-                msgs.extend(student.apply_hunger_decay(hours))
-                msgs.extend(student.study(hours=hours))
-            elif action == 'sleep' and student.action_status['sleep']:
-                msgs.extend(student.apply_hunger_decay(hours))
-                msgs.extend(student.rest(hours=hours))
-            elif action == 'relax' and student.action_status['relax']:
-                msgs.extend(student.apply_hunger_decay(hours))
-                msgs.extend(student.take_break(hours=hours))
-            elif action == 'eat' and student.action_status['eat']:
-                msgs.extend(student.apply_hunger_decay(0.5))
-                msgs.extend(student.eat())
-            elif action == 'coffee' and student.action_status['coffee']:
-                msgs.extend(student.apply_hunger_decay(0.25))
-                msgs.extend(student.drink_coffee())
-        day_msgs = student.end_of_day()
-        msgs.extend(day_msgs)
-        msgs.append(f"Day {current_day} completed (fast-forward).")
-        # Stop replay if burnout was triggered this day
-        if any("Burnout!" in m for m in day_msgs):
-            burnout_occurred = True
-            msgs.append("Loop paused. You need to recover!")
-            break
-    return current_day, msgs, burnout_occurred
+def outage_overlap(outages, t_start, t_end):
+    """Return total hours of outage overlap in [t_start, t_end)."""
+    total = 0.0
+    for o in outages:
+        o_start = o["start"]
+        o_end   = o["start"] + o["duration"]
+        overlap = max(0.0, min(t_end, o_end) - max(t_start, o_start))
+        total += overlap
+    return total
+
+
+class ReplayRunner:
+    def __init__(self, student, actions, n, start_day):
+        self.student     = student
+        self.actions     = list(actions)
+        self.total_days  = n
+        self.current_day = start_day
+        self.days_done   = 0
+        self.action_idx  = 0
+        self.time_cursor = float(DAY_START)    # simulated time within the replayed day
+
+        # Pending alert: set when an outage fires, cleared after player dismisses
+        self.pending_alert = None   # (title, body) tuple or None
+
+        self.msgs           = []
+        self.done           = False
+        self.burnout_occurred = False
+
+        # Generate outages for first replayed day
+        self._day_outages    = wifi_failure_event()
+        self._outage_idx     = 0   # next unprocessed outage in _day_outages
+
+        self._start_new_day()
+
+    def _start_new_day(self):
+        self.current_day += 1
+        self.days_done   += 1
+        self.action_idx   = 0
+        self.time_cursor  = float(DAY_START)
+        self._day_outages = wifi_failure_event()
+        self._outage_idx  = 0
+
+    def tick(self):
+        # If all days are done, finish up
+        if self.days_done > self.total_days:
+            self.done = True
+            return [], None
+
+        # If all actions for this day are done, run end_of_day
+        if self.action_idx >= len(self.actions):
+            day_msgs = self.student.end_of_day()
+            self.msgs.extend(day_msgs)
+            self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
+            if any("Burnout!" in m for m in day_msgs):
+                self.burnout_occurred = True
+                self.msgs.append("Loop paused. You need to recover!")
+                self.done = True
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+            if self.days_done >= self.total_days:
+                self.done = True
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+            # Start next day
+            self._start_new_day()
+            return day_msgs + [f"Day {self.current_day - 1} completed (fast-forward)."], None
+
+        action, hours = self.actions[self.action_idx]
+        action_start  = self.time_cursor
+        action_end    = self.time_cursor + hours
+
+        # Check if any un-processed outage starts before this action ends
+        if self._outage_idx < len(self._day_outages):
+            outage = self._day_outages[self._outage_idx]
+            if outage["start"] < action_end:
+                # Fire the outage interrupt BEFORE running the action
+                self._outage_idx += 1
+                dur_min = round(outage["duration"] * 60)
+                at_time = format_time(outage["start"])
+                title = f"WiFi Outage!"
+                body  = (f"At {at_time} on Day {self.current_day}, wifi went down for {dur_min} minutes.")
+                return [], (title, body)
+
+        # Run the action
+        new_msgs = []
+        overlap  = outage_overlap(self._day_outages, action_start, action_end)
+        wifi_on  = (overlap > 0 and action == 'study')
+
+        if action == 'study' and self.student.action_status['study']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.study(hours=hours, wifi_penalty=wifi_on))
+            if wifi_on:
+                new_msgs.append("WiFi was down during part of your study session!")
+        elif action == 'sleep' and self.student.action_status['sleep']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.rest(hours=hours))
+        elif action == 'relax' and self.student.action_status['relax']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.take_break(hours=hours))
+        elif action == 'eat' and self.student.action_status['eat']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.5))
+            new_msgs.extend(self.student.eat())
+        elif action == 'coffee' and self.student.action_status['coffee']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.25))
+            new_msgs.extend(self.student.drink_coffee())
+
+        self.time_cursor = action_end
+        self.action_idx += 1
+        self.msgs.extend(new_msgs)
+        return new_msgs, None
+
+    def last_msgs(self, n=5):
+        return self.msgs[-n:]
+
 
 # Game states
 MAIN_MENU = "main_menu"
@@ -87,6 +171,7 @@ message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
 input_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 input_box = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
+alert_box = AlertBox(message_font, input_font)
 pending_action = None  # tracks which action is waiting for hour input
 
 # Status bars
@@ -108,13 +193,14 @@ eat_btn = Button(646, 520, 124, 40, "Eat", button_font)
 
 game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
-# Day-end buttons  
+# Day-end buttons
 _btn_y = HEIGHT // 2 + 40
 continue_btn = Button(WIDTH // 2 - 196, _btn_y, 114, 40, "Continue", button_font)
 repeat_btn   = Button(WIDTH // 2 -  57, _btn_y, 114, 40, "Repeat",   button_font)
 quit_btn     = Button(WIDTH // 2 + 82,  _btn_y, 114, 40, "Quit",     button_font)
 
 messages = []
+replay_runner: ReplayRunner | None = None  # active replay state machine
 
 running = True
 while running:
@@ -130,7 +216,7 @@ while running:
         relax_btn.enabled = student.action_status['relax'] and remaining_hours > 0
         eat_btn.enabled = student.action_status['eat'] and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
-    
+
     # Update day-end button states
     repeat_btn.enabled = not burnout_active
 
@@ -145,26 +231,42 @@ while running:
         elif current_screen_state == GAME_SCREEN:
             new_messages = []
 
-            if repeat_box.active:
+            if alert_box.active:
+                alert_box.handle_event(event)
+
+            elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
-                    day_count, replay_msgs, replay_burnout = replay_days(student, day_actions, n, day_count)
-                    messages = replay_msgs[-5:]
-                    if replay_burnout:
-                        burnout_active = True
-                    current_screen_state = DAY_END_SCREEN
+                    replay_runner = ReplayRunner(student, day_actions, n, day_count)
+                    messages = []
                     day_over = True
+                    current_screen_state = DAY_END_SCREEN
 
             elif input_box.active:
                 hours = input_box.handle_event(event)
                 if hours is not None:
+                    t_before = time_of_day
+                    t_after  = time_of_day + hours
+
+                    # Compute wifi overlap for this action window
+                    overlap = outage_overlap(daily_outages, t_before, t_after)
+                    wifi_affected = (overlap > 0 and pending_action == 'study')
+
                     new_messages.extend(student.apply_hunger_decay(hours))
                     if pending_action == 'study':
-                        new_messages.extend(student.study(hours=hours))
+                        new_messages.extend(student.study(hours=hours, wifi_penalty=wifi_affected))
                     elif pending_action == 'sleep':
                         new_messages.extend(student.rest(hours=hours))
                     elif pending_action == 'relax':
                         new_messages.extend(student.take_break(hours=hours))
+
+                    # Show popup for ANY action affected by an outage
+                    if overlap > 0:
+                        dur_min = round(overlap * 60)
+                        alert_box.open(
+                            f"WiFi Outage  -  Day {day_count}",
+                            f"WiFi was down for ~{dur_min} min during your {pending_action} session!"
+                        )
                     record_action(pending_action, hours)
                     time_of_day += hours
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -242,20 +344,34 @@ while running:
                 messages = messages[-5:]
 
         elif current_screen_state == DAY_END_SCREEN:
-            if repeat_box.active:
+            # AlertBox intercepts all input while active during replay 
+            if alert_box.active:
+                dismissed = alert_box.handle_event(event)
+                # After dismissal, tick the runner once more to continue
+                if dismissed and replay_runner and not replay_runner.done:
+                    step_msgs, alert_info = replay_runner.tick()
+                    if alert_info:
+                        alert_box.open(*alert_info)
+                    messages = replay_runner.last_msgs()
+                    if replay_runner.done:
+                        day_count = replay_runner.current_day
+                        if replay_runner.burnout_occurred:
+                            burnout_active = True
+
+            elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
-                    day_count, replay_msgs, replay_burnout = replay_days(student, day_actions, n, day_count)
-                    messages = replay_msgs[-5:]
-                    if replay_burnout:
-                        burnout_active = True
+                    replay_runner = ReplayRunner(student, day_actions, n, day_count)
+                    messages = []
 
             else:
                 if continue_btn.clicked(event):
+                    replay_runner = None
                     day_count += 1
                     time_of_day = DAY_START
                     day_over = False
                     day_actions.clear()
+                    daily_outages = wifi_failure_event()  # generate new outages for next live day
                     messages = [f"Day {day_count} begins!"]
                     print(f"\n--- Day {day_count} ---")
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -270,14 +386,31 @@ while running:
                 if quit_btn.clicked(event):
                     running = False
 
+    if (current_screen_state == DAY_END_SCREEN
+            and replay_runner is not None
+            and not replay_runner.done
+            and not alert_box.active
+            and not repeat_box.active):
+        step_msgs, alert_info = replay_runner.tick()
+        if alert_info:
+            alert_box.open(*alert_info)
+        messages = replay_runner.last_msgs()
+        if replay_runner.done:
+            day_count = replay_runner.current_day
+            if replay_runner.burnout_occurred:
+                burnout_active = True
+
     screen.fill((30, 30, 30))
 
     if current_screen_state == MAIN_MENU:
         main_menu(screen, main_bg, start_btn)
+
     elif current_screen_state == GAME_SCREEN:
         game_screen(screen, study_bg, student, bars, game_buttons, messages, message_font)
         input_box.draw(screen)
         repeat_box.draw(screen)
+        alert_box.draw(screen)
+
     elif current_screen_state == DAY_END_SCREEN:
         game_screen(screen, study_bg, student, bars, game_buttons, messages, message_font)
         # Draw day-end overlay
@@ -287,17 +420,23 @@ while running:
         title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 32)
         title_surf = title_font.render(f"Day {day_count} Complete!", True, (255, 255, 255))
         screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, HEIGHT // 2 - 60))
-        
+
         if burnout_active:
-            burnout_surf = message_font.render(f"You're burned out and need to recover for {student.burnout_days_remaining} days!", True, (255, 90, 90))
+            burnout_surf = message_font.render(
+                f"You're burned out and need to recover for {student.burnout_days_remaining} days!",
+                True, (255, 90, 90)
+            )
             screen.blit(burnout_surf, (WIDTH // 2 - burnout_surf.get_width() // 2, HEIGHT // 2 - 10))
         else:
-            prompt_surf = message_font.render("Continue, repeat today's actions, or quit?", True, (200, 200, 200))
+            prompt_surf = message_font.render(
+                "Continue, repeat today's actions, or quit?", True, (200, 200, 200)
+            )
             screen.blit(prompt_surf, (WIDTH // 2 - prompt_surf.get_width() // 2, HEIGHT // 2 - 10))
         continue_btn.draw(screen)
         repeat_btn.draw(screen)
         quit_btn.draw(screen)
         repeat_box.draw(screen)
+        alert_box.draw(screen)
 
     pygame.display.flip()
     clock.tick(60)

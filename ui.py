@@ -337,3 +337,65 @@ class NumberBox:
             hint_surf = self.smallfont.render("Enter to confirm    Esc to cancel", True, (140, 140, 180))
             screen.blit(hint_surf, (box_x + 20, box_y + 118))
 
+
+class AlertBox:
+    def __init__(self, font, smallfont):
+        self.font = font
+        self.smallfont = smallfont
+        self.active = False
+        self.title = ""
+        self.body = ""
+
+    def open(self, title: str, body: str):
+        self.active = True
+        self.title = title
+        self.body = body
+
+    def handle_event(self, event):
+        if not self.active:
+            return None
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.active = False
+                return True
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if hasattr(self, '_btn_rect') and self._btn_rect.collidepoint(event.pos):
+                self.active = False
+                return True
+        return None
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+
+        box_w, box_h = 420, 200
+        box_x = (screen.get_width() - box_w) // 2
+        box_y = (screen.get_height() - box_h) // 2
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+
+        pygame.draw.rect(screen, (60, 20, 20), box_rect, border_radius=10)
+        pygame.draw.rect(screen, (255, 80, 80), box_rect, 2, border_radius=10)
+
+        # Title
+        title_surf = self.font.render(self.title, True, (255, 80, 80))
+        screen.blit(title_surf, title_surf.get_rect(centerx=box_rect.centerx, y=box_y + 18))
+
+        # Body  (wrap at ~50 chars manually if needed)
+        body_surf = self.smallfont.render(self.body, True, (220, 220, 220))
+        screen.blit(body_surf, body_surf.get_rect(centerx=box_rect.centerx, y=box_y + 58))
+
+        # Continue button
+        btn_w, btn_h = 120, 36
+        self._btn_rect = pygame.Rect(
+            box_rect.centerx - btn_w // 2,
+            box_y + box_h - btn_h - 16,
+            btn_w, btn_h
+        )
+        pygame.draw.rect(screen, (180, 40, 40), self._btn_rect, border_radius=6)
+        pygame.draw.rect(screen, (255, 120, 120), self._btn_rect, 2, border_radius=6)
+        btn_surf = self.smallfont.render("Continue  [Enter]", True, (255, 255, 255))
+        screen.blit(btn_surf, btn_surf.get_rect(center=self._btn_rect.center))

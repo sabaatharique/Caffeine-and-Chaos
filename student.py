@@ -14,6 +14,11 @@ class Student:
         self.hunger_decay_rate = 1.5      # base HP lost per half-life period
         self.hunger_half_life = 4.0       # hours until decay doubles
 
+        # WiFi state
+        self.wifi_down = False            # set True during an outage
+        self.wifi_knowledge_penalty = 0.5 # multiplier on knowledge gain when wifi is down
+        self.wifi_stress_penalty = 4.0    # extra stress per hour of studying without wifi
+
         # Academic tracking
         self.attendance = 0
 
@@ -134,16 +139,19 @@ class Student:
         messages.extend(self.clamp())
         return messages
 
-    def study(self, hours=2.0):
+    def study(self, hours=2.0, wifi_penalty=False):
         messages = []
         if not self.action_status['study']:
             messages.append("You are too tired to study.")
             return messages
         # Study efficiency depends on current state
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation)) / 400
-        self.knowledge += hours * self.study_knowledge_rate * efficiency
+        knowledge_mult = self.wifi_knowledge_penalty if wifi_penalty else 1.0
+        self.knowledge += hours * self.study_knowledge_rate * efficiency * knowledge_mult
         self.sleep -= hours * self.study_sleep_rate
         self.stress += hours * self.study_stress_rate
+        if wifi_penalty:
+            self.stress += hours * self.wifi_stress_penalty
         self.health -= hours * self.study_health_rate
 
         messages.extend(self.clamp())
@@ -163,10 +171,6 @@ class Student:
         return messages
     
     def apply_hunger_decay(self, elapsed_hours):
-        """Apply exponential health decay based on how long since last meal.
-        Penalty = rate * (2^(total_hours / half_life) - 1)
-        This is nearly zero for the first couple hours but ramps up fast.
-        """
         old_total = self.hours_since_last_meal
         new_total = old_total + elapsed_hours
         self.hours_since_last_meal = new_total
