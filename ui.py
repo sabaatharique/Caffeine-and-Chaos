@@ -6,23 +6,34 @@ class StatusBar:
         self.rect = pygame.Rect(x, y, w, h)
         self.label = label
         self.font = font
+        self.bg_color = (44, 62, 80)      # Sophisticated dark blue-gray
+        self.border_color = (189, 195, 199) # Light gray border
+        self.radius = 8
 
     def draw(self, screen, value):
-        pygame.draw.rect(screen, (50, 50, 50), self.rect)
-
-        fill_width = int(self.rect.width * value / 100)
-        fill_rect = pygame.Rect(
-            self.rect.x, self.rect.y, fill_width, self.rect.height
-        )
+        # Draw background container
+        pygame.draw.rect(screen, self.bg_color, self.rect, border_radius=self.radius)
+        
+        # Determine bar color
         if self.label == 'Stress':
-            bar_color = (255, 0, 0) if value > 70 else (0, 180, 0)
+            # Red if high stress
+            bar_color = (231, 76, 60) if value > 70 else (46, 204, 113)
         else:
-            bar_color = (255, 0, 0) if value < 30 else (0, 180, 0)
-        pygame.draw.rect(screen, bar_color, fill_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
+            # Red if low status (e.g. caffeine/energy)
+            bar_color = (231, 76, 60) if value < 30 else (46, 204, 113)
 
-        text = self.font.render(f"{self.label}: {int(value)}", True, (255, 255, 255))
-        screen.blit(text, (self.rect.x, self.rect.y - 26))
+        # Draw fill
+        fill_width = int(self.rect.width * value / 100)
+        if fill_width > 0:
+            fill_rect = pygame.Rect(self.rect.x, self.rect.y, fill_width, self.rect.height)
+            pygame.draw.rect(screen, bar_color, fill_rect, border_radius=self.radius)
+
+        # Draw border
+        pygame.draw.rect(screen, self.border_color, self.rect, 2, border_radius=self.radius)
+
+        # Draw label
+        text = self.font.render(f"{self.label}: {int(value)}", True, (236, 240, 241))
+        screen.blit(text, (self.rect.x, self.rect.y - 28))
 
 
 class Button:
@@ -31,16 +42,30 @@ class Button:
         self.text = text
         self.font = font
         self.enabled = enabled
+        self.base_color = (52, 152, 219)    # Bright blue
+        self.hover_color = (41, 128, 185)   # Darker blue
+        self.disabled_color = (127, 140, 141) # Gray
+        self.border_color = (236, 240, 241) # Off-white
+        self.radius = 10
 
     def draw(self, screen):
-        if self.enabled:
-            pygame.draw.rect(screen, (70, 70, 200), self.rect)
-            pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
+        mouse_pos = pygame.mouse.get_pos()
+        is_hovered = self.rect.collidepoint(mouse_pos)
+
+        if not self.enabled:
+            color = self.disabled_color
+            txt_color = (189, 195, 199)
+        elif is_hovered:
+            color = self.hover_color
             txt_color = (255, 255, 255)
         else:
-            pygame.draw.rect(screen, (100, 100, 100), self.rect)
-            pygame.draw.rect(screen, (150, 150, 150), self.rect, 2)
-            txt_color = (180, 180, 180)
+            color = self.base_color
+            txt_color = (255, 255, 255)
+
+        # Draw main button
+        pygame.draw.rect(screen, color, self.rect, border_radius=self.radius)
+        # Draw border
+        pygame.draw.rect(screen, self.border_color, self.rect, 2, border_radius=self.radius)
 
         txt = self.font.render(self.text, True, txt_color)
         screen.blit(txt, txt.get_rect(center=self.rect.center))

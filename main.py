@@ -7,7 +7,7 @@ from events import wifi_failure_event
 
 pygame.init()
 
-WIDTH, HEIGHT = 800, 600
+WIDTH, HEIGHT = 1000, 650
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Caffeine & Chaos")
 
@@ -48,7 +48,7 @@ def outage_overlap(outages, t_start, t_end):
     total = 0.0
     for o in outages:
         o_start = o["start"]
-        o_end   = o["start"] + o["duration"]
+        o_end = o["start"] + o["duration"]
         overlap = max(0.0, min(t_end, o_end) - max(t_start, o_start))
         total += overlap
     return total
@@ -56,19 +56,20 @@ def outage_overlap(outages, t_start, t_end):
 
 class ReplayRunner:
     def __init__(self, student, actions, n, start_day):
-        self.student     = student
-        self.actions     = list(actions)
-        self.total_days  = n
+        self.student = student
+        self.actions = list(actions)
+        self.total_days = n
         self.current_day = start_day
-        self.days_done   = 0
-        self.action_idx  = 0
+        self.days_done = 0
+        self.action_idx = 0
         self.time_cursor = float(DAY_START)    # simulated time within the replayed day
+        self.current_action = None
 
         # Pending alert: set when an outage fires, cleared after player dismisses
         self.pending_alert = None   # (title, body) tuple or None
 
-        self.msgs           = []
-        self.done           = False
+        self.msgs = []
+        self.done = False
         self.burnout_occurred = False
 
         # Generate outages for first replayed day
@@ -79,11 +80,11 @@ class ReplayRunner:
 
     def _start_new_day(self):
         self.current_day += 1
-        self.days_done   += 1
-        self.action_idx   = 0
-        self.time_cursor  = float(DAY_START)
+        self.days_done += 1
+        self.action_idx = 0
+        self.time_cursor = float(DAY_START)
         self._day_outages = wifi_failure_event()
-        self._outage_idx  = 0
+        self._outage_idx = 0
 
     def tick(self):
         # If all days are done, finish up
@@ -109,8 +110,8 @@ class ReplayRunner:
             return day_msgs + [f"Day {self.current_day - 1} completed (fast-forward)."], None
 
         action, hours = self.actions[self.action_idx]
-        action_start  = self.time_cursor
-        action_end    = self.time_cursor + hours
+        action_start = self.time_cursor
+        action_end = self.time_cursor + hours
 
         # Check if any un-processed outage starts before this action ends
         if self._outage_idx < len(self._day_outages):
@@ -149,6 +150,7 @@ class ReplayRunner:
 
         self.time_cursor = action_end
         self.action_idx += 1
+        self.current_action = action
         self.msgs.extend(new_msgs)
         return new_msgs, None
 
@@ -164,7 +166,15 @@ current_screen_state = MAIN_MENU
 
 # Load images
 main_bg = pygame.image.load("assets/images/main.jpg")
-study_bg = pygame.image.load("assets/images/study.jpg")
+bg_map = {
+    'study': pygame.image.load("assets/images/study.jpg"),
+    'sleep': pygame.image.load("assets/images/sleep.jpg"),
+    'relax': pygame.image.load("assets/images/break.jpg"),
+    'coffee': pygame.image.load("assets/images/coffee.jpg"),
+    'eat': pygame.image.load("assets/images/eat.jpg"),
+    'default': pygame.image.load("assets/images/study.jpg")
+}
+current_game_bg = bg_map['default']
 
 button_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
 message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
@@ -172,32 +182,39 @@ input_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 input_box = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
 alert_box = AlertBox(message_font, input_font)
-pending_action = None  # tracks which action is waiting for hour input
+pending_action = None  
 
 # Status bars
+bar_w = 130
+bar_h = 16
+bar_space = (WIDTH - 6*(bar_w)) / 7
 bars = [
-    StatusBar(30, 60, 124, 20, "Knowledge", message_font),
-    StatusBar(184, 60, 124, 20, "Sleep", message_font),
-    StatusBar(338, 60, 124, 20, "Health", message_font),
-    StatusBar(492, 60, 124, 20, "Stress", message_font),
-    StatusBar(646, 60, 124, 20, "Motivation", message_font),
+    StatusBar(bar_space, 60, bar_w, bar_h, "Knowledge", message_font),
+    StatusBar(bar_space*2 + bar_w, 60, bar_w, bar_h, "Sleep", message_font),
+    StatusBar(bar_space*3 + bar_w*2, 60, bar_w, bar_h, "Health", message_font),
+    StatusBar(bar_space*4 + bar_w*3, 60, bar_w, bar_h, "Stress", message_font),
+    StatusBar(bar_space*5 + bar_w*4, 60, bar_w, bar_h, "Motivation", message_font),
 ]
 
 # Buttons
-start_btn = Button(WIDTH - 154, HEIGHT - 70, 124, 40, "Start", button_font)
-study_btn = Button(30, 520, 124, 40, "Study", button_font)
-sleep_btn = Button(184, 520, 124, 40, "Sleep", button_font)
-relax_btn = Button(338, 520, 124, 40, "Relax", button_font)
-drink_coffee_btn = Button(492, 520, 124, 40, "Drink Coffee", button_font)
-eat_btn = Button(646, 520, 124, 40, "Eat", button_font)
+start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "Start", button_font)
+ 
+btn_w = 140
+btn_h = 40
+btn_space = (WIDTH - 5*(btn_w)) / 6
+study_btn = Button(btn_space, HEIGHT - 80, btn_w, btn_h, "Study", button_font)
+sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", button_font)
+relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
+drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
+eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
 
 game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
 # Day-end buttons
 _btn_y = HEIGHT // 2 + 40
 continue_btn = Button(WIDTH // 2 - 196, _btn_y, 114, 40, "Continue", button_font)
-repeat_btn   = Button(WIDTH // 2 -  57, _btn_y, 114, 40, "Repeat",   button_font)
-quit_btn     = Button(WIDTH // 2 + 82,  _btn_y, 114, 40, "Quit",     button_font)
+repeat_btn = Button(WIDTH // 2 -  57, _btn_y, 114, 40, "Repeat", button_font)
+quit_btn = Button(WIDTH // 2 + 82,  _btn_y, 114, 40, "Quit", button_font)
 
 messages = []
 replay_runner: ReplayRunner | None = None  # active replay state machine
@@ -265,8 +282,9 @@ while running:
                         dur_min = round(overlap * 60)
                         alert_box.open(
                             f"WiFi Outage  -  Day {day_count}",
-                            f"WiFi was down for ~{dur_min} min during your {pending_action} session!"
+                            f"WiFi was down for {dur_min} minutes during your {pending_action} session!"
                         )
+                    current_game_bg = bg_map.get(pending_action, bg_map['default'])
                     record_action(pending_action, hours)
                     time_of_day += hours
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -306,6 +324,7 @@ while running:
                 if drink_coffee_btn.clicked(event):
                     new_messages.extend(student.apply_hunger_decay(0.25))
                     new_messages.extend(student.drink_coffee())
+                    current_game_bg = bg_map['coffee']
                     record_action('coffee', 0.25)
                     time_of_day += 0.25  # 15 minutes
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -324,6 +343,7 @@ while running:
                 if eat_btn.clicked(event):
                     new_messages.extend(student.apply_hunger_decay(0.5))
                     new_messages.extend(student.eat())
+                    current_game_bg = bg_map['eat']
                     record_action('eat', 0.5)
                     time_of_day += 0.5  # 30 minutes
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -371,6 +391,7 @@ while running:
                     time_of_day = DAY_START
                     day_over = False
                     day_actions.clear()
+                    current_game_bg = bg_map['default']
                     daily_outages = wifi_failure_event()  # generate new outages for next live day
                     messages = [f"Day {day_count} begins!"]
                     print(f"\n--- Day {day_count} ---")
@@ -395,6 +416,8 @@ while running:
         if alert_info:
             alert_box.open(*alert_info)
         messages = replay_runner.last_msgs()
+        if replay_runner.current_action:
+            current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
         if replay_runner.done:
             day_count = replay_runner.current_day
             if replay_runner.burnout_occurred:
@@ -406,13 +429,13 @@ while running:
         main_menu(screen, main_bg, start_btn)
 
     elif current_screen_state == GAME_SCREEN:
-        game_screen(screen, study_bg, student, bars, game_buttons, messages, message_font)
+        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
         input_box.draw(screen)
         repeat_box.draw(screen)
         alert_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
-        game_screen(screen, study_bg, student, bars, game_buttons, messages, message_font)
+        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
         # Draw day-end overlay
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
