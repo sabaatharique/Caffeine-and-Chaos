@@ -42,8 +42,8 @@ day_actions = []
 # Outages for the current live day (list of {"start": h, "duration": h})
 daily_outages = wifi_failure_event()
 
-def record_action(action: str, hours: float):
-    day_actions.append((action, hours))
+def record_action(action: str, hours: float, data=None):
+    day_actions.append((action, hours, data))
 
 def outage_overlap(outages, t_start, t_end):
     """Return total hours of outage overlap in [t_start, t_end)."""
@@ -112,7 +112,7 @@ class ReplayRunner:
             self._start_new_day()
             return day_msgs + [f"Day {self.current_day - 1} completed (fast-forward)."], None
 
-        action, hours = self.actions[self.action_idx]
+        action, hours, data = self.actions[self.action_idx]
         action_start = self.time_cursor
         action_end = self.time_cursor + hours
 
@@ -134,9 +134,8 @@ class ReplayRunner:
         wifi_on  = (overlap > 0 and action == 'study')
 
         if action == 'study' and self.student.action_status['study']:
-            # For replay, we just pick the first course if not specified 
-            # (In a real replay we'd store the course ID, but for now we'll pick first theory)
-            target = next((c for c in self.course_manager.courses if c.course_type == "Theory"), self.course_manager.courses[0])
+            # Use recorded course data if available, otherwise fallback
+            target = data if data else next((c for c in self.course_manager.courses if c.course_type == "Theory"), self.course_manager.courses[0])
             avg = self.course_manager.get_average_knowledge()
             new_msgs.extend(self.student.apply_hunger_decay(hours))
             new_msgs.extend(self.student.study(course=target, hours=hours, avg_knowledge=avg, wifi_penalty=wifi_on))
@@ -159,6 +158,10 @@ class ReplayRunner:
         self.action_idx += 1
         self.current_action = action
         self.msgs.extend(new_msgs)
+        
+        # Slow down the fast-forward slightly for better visibility
+        pygame.time.wait(300)
+        
         return new_msgs, None
 
     def last_msgs(self, n=5):
@@ -191,6 +194,8 @@ input_box = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
 alert_box = AlertBox(message_font, input_font)
 wizard = SetupWizard(message_font, input_font, button_font)
+clock_font = pygame.font.Font("assets/fonts/Digital-7.ttf", 50)
+date_font = pygame.font.Font("assets/fonts/Digital-7.ttf", 35)
 pending_action = None  
 
 # Status bars
@@ -207,7 +212,7 @@ bars = [
 ]
 
 # Buttons
-start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "Start", button_font)
+start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "Start", button_font, 'black')
  
 btn_w = 140
 btn_h = 40
@@ -312,11 +317,13 @@ while running:
                             f"WiFi was down for {dur_min} minutes during your {pending_action} session!"
                         )
                     current_game_bg = bg_map.get(pending_action, bg_map['default'])
-                    record_action(pending_action, hours)
+                    record_action(pending_action, hours, target_course)
                     time_of_day += hours
                     print(f"Time of day: {format_time(time_of_day)}")
                     pending_action = None
-                    if time_of_day >= DAY_END:
+                    
+                    # Round to nearest minute to avoid float precision issues
+                    if round(time_of_day * 60) >= round(DAY_END * 60):
                         day_over = True
                         eod_msgs = student.end_of_day()
                         new_messages.extend(eod_msgs)
@@ -356,7 +363,7 @@ while running:
                     record_action('coffee', 0.25)
                     time_of_day += 0.25  # 15 minutes
                     print(f"Time of day: {format_time(time_of_day)}")
-                    if time_of_day >= DAY_END:
+                    if round(time_of_day * 60) >= round(DAY_END * 60):
                         day_over = True
                         eod_msgs = student.end_of_day()
                         new_messages.extend(eod_msgs)
@@ -375,7 +382,7 @@ while running:
                     record_action('eat', 0.5)
                     time_of_day += 0.5  # 30 minutes
                     print(f"Time of day: {format_time(time_of_day)}")
-                    if time_of_day >= DAY_END:
+                    if round(time_of_day * 60) >= round(DAY_END * 60):
                         day_over = True
                         eod_msgs = student.end_of_day()
                         new_messages.extend(eod_msgs)
@@ -401,8 +408,10 @@ while running:
                     if alert_info:
                         alert_box.open(*alert_info)
                     messages = replay_runner.last_msgs()
+                    # Sync global state for UI
+                    day_count = replay_runner.current_day
+                    time_of_day = replay_runner.time_cursor
                     if replay_runner.done:
-                        day_count = replay_runner.current_day
                         if replay_runner.burnout_occurred:
                             burnout_active = True
 
@@ -444,10 +453,12 @@ while running:
         if alert_info:
             alert_box.open(*alert_info)
         messages = replay_runner.last_msgs()
+        # Sync global state for UI
+        day_count = replay_runner.current_day
+        time_of_day = replay_runner.time_cursor
         if replay_runner.current_action:
             current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
         if replay_runner.done:
-            day_count = replay_runner.current_day
             if replay_runner.burnout_occurred:
                 burnout_active = True
 
@@ -461,18 +472,59 @@ while running:
 
     elif current_screen_state == GAME_SCREEN:
         avg_k = course_manager.get_average_knowledge()
-        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
+        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font, bar_space)
         # Manually draw bars[0] (Knowledge) with the calculated average
         bars[0].draw(screen, avg_k)
         
+        # Draw Digital Clock (Time and Day)
+        clock_color = (255, 255, 0) # Neon Cyan
+        time_str = format_time(time_of_day)
+        time_surf = clock_font.render(time_str, True, clock_color)
+        day_surf = date_font.render(f"Day {day_count}", True, clock_color)
+        
+        # Calculate box dimensions
+        box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
+        box_h = time_surf.get_height() + day_surf.get_height() + 5
+        # Align right edge with last bar right edge (WIDTH - bar_space)
+        box_x = WIDTH - bar_space - box_w
+        box_y = 95
+        
+        # Draw semi-transparent background box
+        clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        clock_bg.fill((0, 0, 0, 180)) # Dark semi-transparent
+        screen.blit(clock_bg, (box_x, box_y))
+        
+        # Draw text surfaces, aligned to the right inside the box
+        screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
+        screen.blit(day_surf, (box_x + box_w - day_surf.get_width() - 10, 100 + time_surf.get_height() - 10))
+
         input_box.draw(screen)
         repeat_box.draw(screen)
         alert_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
-        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
+        game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font, bar_space)
         bars[0].draw(screen, avg_k)
+
+        # Draw Digital Clock even on summary screen
+        clock_color = (255, 255, 0)
+        time_str = format_time(time_of_day)
+        time_surf = clock_font.render(time_str, True, clock_color)
+        day_surf = date_font.render(f"Day {day_count}", True, clock_color)
+        
+        box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
+        box_h = time_surf.get_height() + day_surf.get_height() + 5
+        box_x = WIDTH - bar_space - box_w
+        box_y = 95
+        
+        clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        clock_bg.fill((0, 0, 0, 180))
+        screen.blit(clock_bg, (box_x, box_y))
+        
+        screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
+        screen.blit(day_surf, (box_x + box_w - day_surf.get_width() - 10, 100 + time_surf.get_height() - 10))
+
         # Draw day-end overlay
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))

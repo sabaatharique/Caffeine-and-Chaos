@@ -31,7 +31,7 @@ class Student:
 
         # Action rates
         _type_mult = {"Good": 1.4, "Average": 1.0, "Bad": 0.7}.get(student_type, 1.0)
-        self.study_knowledge_rate = 5 * _type_mult
+        self.study_knowledge_rate = 4 * _type_mult
         self.study_sleep_rate =  8    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   
@@ -269,6 +269,6 @@ class Student:
         self.stress += 10
         self.sleep -= 15
 
-        self.burnout_days_remaining = 3
+        self.burnout_days_remaining = 2
         self.consecutive_stress_days = 0
         self.clamp()

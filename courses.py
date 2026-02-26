@@ -8,7 +8,7 @@ class Course:
         self.course_type = course_type
         self.schedule = schedule           # "weekly" or "biweekly"
 
-        self.knowledge = 0.0
+        self.knowledge = 10
 
         # Attendance
         self.total_classes = total_classes
@@ -266,4 +266,4 @@ class CourseManager:
     def get_average_knowledge(self):
         if not self.courses:
             return 0.0
-        return sum(c.knowledge for c in self.courses) / len(self.courses)
+        return sum(c.knowledge * c.credits for c in self.courses) / sum(c.credits for c in self.courses)
