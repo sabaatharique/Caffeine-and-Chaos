@@ -8,6 +8,10 @@ class Course:
 
     self.knowledge = 0.0
 
+    # Attendance
+    self.total_classes = total_classes
+    self.attended_classes = 0
+
     # Theory
     self.quiz_marks = []
     self.mid_mark = None
@@ -27,7 +31,16 @@ class Course:
         self.knowledge = max(0, min(100, self.knowledge))
 
    
-      
+    def attend_class(self):
+        # To do
+        pass
+
+
+    def get_attendance_percentage(self):
+        if self.total_classes == 0:
+            return 0
+        return (self.attended_classes / self.total_classes) * 100  
+    
     # THEORY SECTION 
     def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
         if self.course_type != "Theory":
