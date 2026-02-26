@@ -262,3 +262,8 @@ class CourseManager:
             return 0
 
         return total_points / total_credits
+
+    def get_average_knowledge(self):
+        if not self.courses:
+            return 0.0
+        return sum(c.knowledge for c in self.courses) / len(self.courses)

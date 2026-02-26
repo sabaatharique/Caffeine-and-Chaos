@@ -5,16 +5,17 @@ class Student:
         self.student_type = student_type          # "Good", "Average", or "Bad"
 
         # Status bars
-        self.knowledge = 30
+        self.sleep = 70
         self.sleep = 70
         self.health = 80
         self.stress = 30
         self.motivation = 60
+        self.hunger = 50
 
         # Hunger tracking
         self.hours_since_last_meal = 0.0  # resets to 0 when eating
-        self.hunger_decay_rate = 1.5      # base HP lost per half-life period
-        self.hunger_half_life = 4.0       # hours until decay doubles
+        self.hunger_decay_rate = 1.5      # base value added to hunger per half-life period
+        self.hunger_half_life = 4.0       # hours until decay period doubles
 
         # WiFi state
         self.wifi_down = False            # set True during an outage
@@ -38,12 +39,13 @@ class Student:
         self.rest_sleep_rate = 10   
         self.rest_stress_rate = 5    
         self.rest_health_rate = 3    
-        self.rest_knowledge_rate = 1    
+        self.rest_health_rate = 3    
 
         self.relax_stress_rate = 8    
         self.relax_motivation_rate = 5    
 
         self.eat_health_gain = 10    
+        self.eat_hunger_reduction = 40    
         self.eat_stress_reduction = 5    
 
         self.coffee_sleep_gain = 10    
@@ -69,25 +71,20 @@ class Student:
         self.action_status['study'] = self.sleep > 0
         self.action_status['sleep'] = self.sleep < 100
         self.action_status['relax'] = True
-        self.action_status['eat'] = self.health < 100
+        self.action_status['eat'] = self.health < 100 or self.hunger > 0
         self.action_status['coffee'] = self.sleep < 100 and self.health > 0
         # self.action_status['attend_class'] = self.sleep > 0
 
     def clamp(self):
         messages = []
         # Keep values within limits
-        self.knowledge = max(0, min(100, self.knowledge))
         self.sleep = max(0, min(100, self.sleep))
         self.health = max(0, min(100, self.health))
         self.stress = max(0, min(100, self.stress))
         self.motivation = max(0, min(100, self.motivation))
+        self.hunger = max(0, min(100, self.hunger))
         self.attendance = max(0, min(100, self.attendance))
 
-
-        if self.knowledge < 10:
-            messages.append("Warning: Knowledge is critically low!")
-        if self.knowledge == 100:
-            messages.append("Knowledge maxxed out!")
 
         if self.sleep < 10:
             messages.append("Warning: Sleep is critically low!")
@@ -129,28 +126,33 @@ class Student:
         messages.extend(self.clamp())
         return messages
 
-    def attend_class(self, course_difficulty=1.0):
+    def attend_class(self, course, avg_knowledge=0.0):
         messages = []
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
             return messages
-        self.knowledge += self.class_knowledge_rate * course_difficulty
-        self.stress += self.class_stress_rate * course_difficulty
+        
+        # Attendance affects specific course knowledge
+        course.add_knowledge(self.class_knowledge_rate)
+        self.stress += self.class_stress_rate
         self.sleep -= self.class_sleep_loss
         self.attendance += 1
 
         messages.extend(self.clamp())
         return messages
 
-    def study(self, hours=2.0, wifi_penalty=False):
+    def study(self, course, hours=2.0, avg_knowledge=30.0, wifi_penalty=False):
         messages = []
         if not self.action_status['study']:
             messages.append("You are too tired to study.")
             return messages
-        # Study efficiency depends on current state
-        efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation)) / 400
+        # Study efficiency depends on current state (using average knowledge for global efficiency)
+        efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation) + avg_knowledge) / 500
         knowledge_mult = self.wifi_knowledge_penalty if wifi_penalty else 1.0
-        self.knowledge += hours * self.study_knowledge_rate * efficiency * knowledge_mult
+        
+        gain = hours * self.study_knowledge_rate * efficiency * knowledge_mult
+        course.add_knowledge(gain)
+        
         self.sleep -= hours * self.study_sleep_rate
         self.stress += hours * self.study_stress_rate
         if wifi_penalty:
@@ -168,7 +170,6 @@ class Student:
         self.sleep += hours * self.rest_sleep_rate
         self.stress -= hours * self.rest_stress_rate
         self.health += hours * self.rest_health_rate
-        self.knowledge -= hours * self.rest_knowledge_rate
 
         messages.extend(self.clamp())
         return messages
@@ -184,19 +185,23 @@ class Student:
 
         messages = []
         if delta > 0:
-            self.health -= delta
+            self.hunger += delta
             if new_total >= 6:
                 messages.append(f"You're starving!")
             elif new_total >= 3:
                 messages.append(f"You're getting hungry...")
+        
+        messages.extend(self.clamp())
         return messages
 
     def eat(self):
         messages = []
         if not self.action_status['eat']:
-            messages.append("You are at nearly full health.")
-            return messages
+             # This msg might not trigger if hunger > 0
+             messages.append("You aren't hungry.")
+             return messages
         self.health += self.eat_health_gain
+        self.hunger -= self.eat_hunger_reduction
         self.stress -= self.eat_stress_reduction
         self.hours_since_last_meal = 0.0  # reset hunger timer
 
@@ -244,9 +249,7 @@ class Student:
             # sleep  += hours * rest_sleep_rate    →  max before 100
             if self.sleep < 100:
                 limits.append((100 - self.sleep) / self.rest_sleep_rate)
-            # knowledge -= hours * rest_knowledge_rate → max before 0
-            if self.knowledge > 0:
-                limits.append(self.knowledge / self.rest_knowledge_rate)
+            # no longer global knowledge limit
 
         elif action == 'relax':
             # No limits for relaxing
@@ -260,7 +263,7 @@ class Student:
         return self.consecutive_stress_days >= 5
 
     def trigger_burnout(self):
-        self.knowledge -= 5
+        # self.knowledge -= 5  # No longer global knowledge
         self.motivation -= 20
         self.health -= 10
         self.stress += 10

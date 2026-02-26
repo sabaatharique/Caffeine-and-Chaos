@@ -14,7 +14,7 @@ def poisson_random(lam):
     return k - 1
 
 
-def wifi_failure_event(p=0.3, lam=2, day_start=8.0, day_end=32.0):
+def wifi_failure_event(p=0.3, lam=1.75, day_start=8.0, day_end=32.0):
     outages = []
 
     # Bernoulli: does wifi fail at all today?

@@ -15,11 +15,11 @@ class StatusBar:
         pygame.draw.rect(screen, self.bg_color, self.rect, border_radius=self.radius)
         
         # Determine bar color
-        if self.label == 'Stress':
-            # Red if high stress
+        if self.label == 'Stress' or self.label == 'Hunger':
+            # Red if high
             bar_color = (231, 76, 60) if value > 70 else (46, 204, 113)
         else:
-            # Red if low status (e.g. caffeine/energy)
+            # Red if low status
             bar_color = (231, 76, 60) if value < 30 else (46, 204, 113)
 
         # Draw fill
@@ -103,8 +103,13 @@ class InputBox:
         self.max_hours = 99.0
         self._error = ""
 
+        # Course selection for study
+        self.courses = []
+        self.selected_course = None
+        self._course_rects = []
 
-    def open(self, action_name, max_hours: float = 99.0):
+
+    def open(self, action_name, max_hours: float = 99.0, courses=None):
         self.active = True
         self._h_text = ""
         self._m_text = ""
@@ -113,8 +118,12 @@ class InputBox:
         self._error = ""
         self._action_name = action_name
         self.max_hours = max_hours
+        self.courses = courses or []
+        self.selected_course = None
+        self._course_rects = []
+        
         max_str = _hours_to_hhmm(max_hours)
-        self.prompt_text = f"How long? (max {max_str})"
+        self.prompt_text = f"How long to {action_name}? (max {max_str})"
 
 
     def _total_hours(self) -> float | None:
@@ -161,15 +170,22 @@ class InputBox:
                 self._type_digit(event.unicode)
         
         if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-                
-                if self.h_rect.collidepoint(mouse_pos):
-                    self._focus = self.FIELD_H
+            mouse_pos = event.pos
+            
+            if self.h_rect.collidepoint(mouse_pos):
+                self._focus = self.FIELD_H
+                self._error = ""
+            
+            elif self.m_rect.collidepoint(mouse_pos):
+                self._focus = self.FIELD_M
+                self._error = ""
+
+            # Check course selection
+            for i, rect in enumerate(self._course_rects):
+                if rect.collidepoint(mouse_pos):
+                    self.selected_course = self.courses[i]
                     self._error = ""
-                
-                elif self.m_rect.collidepoint(mouse_pos):
-                    self._focus = self.FIELD_M
-                    self._error = ""
+
         return None
 
     def _type_digit(self, ch: str):
@@ -185,6 +201,10 @@ class InputBox:
         return None
 
     def _try_confirm(self):
+        if self._action_name == 'study' and not self.selected_course:
+            self._error = "Please select a course to study"
+            return None
+
         value = self._total_hours()
         if value is None or value <= 0:
             self._error = "Enter a valid time greater than 0"
@@ -196,7 +216,9 @@ class InputBox:
         if value > self.max_hours + 1e-9:
             self._error = f"Max allowed: {_hours_to_hhmm(self.max_hours)}"
             return None
-        self.result = value
+        
+        # Return hours AND selected course for study
+        self.result = (value, self.selected_course) if self._action_name == 'study' else value
         self.active = False
         self._error = ""
         return self.result
@@ -211,7 +233,10 @@ class InputBox:
         overlay.fill((0, 0, 0, 160))
         screen.blit(overlay, (0, 0))
 
-        box_w, box_h = 360, 170
+        # Dynamic height if courses are shown
+        base_h = 170
+        extra_h = (len(self.courses) * 35 + 40) if self.courses else 0
+        box_w, box_h = 420, base_h + extra_h
         box_x = (screen.get_width() - box_w) // 2
         box_y = (screen.get_height() - box_h) // 2
         box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
@@ -235,7 +260,6 @@ class InputBox:
         pygame.draw.rect(screen, h_border_color, self.h_rect, 2, border_radius=6)
 
         if not self._h_text:
-            # Placeholder
             ph = self.font.render("HH", True, (100, 100, 130))
             screen.blit(ph, ph.get_rect(center=self.h_rect.center))
         else:
@@ -261,20 +285,36 @@ class InputBox:
             m_surf = self.font.render(self._m_text, True, (255, 255, 255))
             screen.blit(m_surf, m_surf.get_rect(center=self.m_rect.center))
 
-        # Labels under fields
-        h_lbl = self.font.render("Hours", True, (160, 160, 200))
-        screen.blit(h_lbl, h_lbl.get_rect(centerx=self.h_rect.centerx, y=field_y + field_h + 4))
-        m_lbl = self.font.render("Minutes", True, (160, 160, 200))
-        screen.blit(m_lbl, m_lbl.get_rect(centerx=self.m_rect.centerx, y=field_y + field_h + 4))
+        # Course Selection Area
+        if self.courses:
+            self._course_rects = []
+            list_y = field_y + field_h + 45
+            header = self.smallfont.render("Select Course to Study:", True, (200, 200, 255))
+            screen.blit(header, (box_x + 20, list_y - 25))
+            
+            for i, c in enumerate(self.courses):
+                rect = pygame.Rect(box_x + 20, list_y + i*35, box_w - 40, 30)
+                self._course_rects.append(rect)
+                
+                is_sel = (c == self.selected_course)
+                bg = (70, 70, 120) if is_sel else (50, 50, 70)
+                border = (255, 255, 150) if is_sel else (100, 100, 150)
+                
+                pygame.draw.rect(screen, bg, rect, border_radius=5)
+                pygame.draw.rect(screen, border, rect, 1 if not is_sel else 2, border_radius=5)
+                
+                txt = self.smallfont.render(f"{c.name} ({c.knowledge:.1f}%)", True, (255, 255, 255))
+                screen.blit(txt, (rect.x + 10, rect.y + (rect.height - txt.get_height()) // 2))
 
         # Error or hint
+        msg_y = box_y + box_h - 30
         if self._error:
-            err_surf = self.font.render(self._error, True, (255, 100, 100))
-            screen.blit(err_surf, (box_x + 20, box_y + 140))
+            err_surf = self.smallfont.render(self._error, True, (255, 100, 100))
+            screen.blit(err_surf, (box_x + 20, msg_y))
         else:
-            hint = "Tab to switch field    Enter to confirm    Esc to cancel"
+            hint = "Enter: Confirm    Esc: Cancel    Click to Select Course"
             hint_surf = self.smallfont.render(hint, True, (140, 140, 180))
-            screen.blit(hint_surf, (box_x + 20, box_y + 140))
+            screen.blit(hint_surf, (box_x + 20, msg_y))
 
 
 class NumberBox:

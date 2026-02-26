@@ -57,8 +57,9 @@ def outage_overlap(outages, t_start, t_end):
 
 
 class ReplayRunner:
-    def __init__(self, student, actions, n, start_day):
+    def __init__(self, student, course_manager, actions, n, start_day):
         self.student = student
+        self.course_manager = course_manager
         self.actions = list(actions)
         self.total_days = n
         self.current_day = start_day
@@ -133,8 +134,12 @@ class ReplayRunner:
         wifi_on  = (overlap > 0 and action == 'study')
 
         if action == 'study' and self.student.action_status['study']:
+            # For replay, we just pick the first course if not specified 
+            # (In a real replay we'd store the course ID, but for now we'll pick first theory)
+            target = next((c for c in self.course_manager.courses if c.course_type == "Theory"), self.course_manager.courses[0])
+            avg = self.course_manager.get_average_knowledge()
             new_msgs.extend(self.student.apply_hunger_decay(hours))
-            new_msgs.extend(self.student.study(hours=hours, wifi_penalty=wifi_on))
+            new_msgs.extend(self.student.study(course=target, hours=hours, avg_knowledge=avg, wifi_penalty=wifi_on))
             if wifi_on:
                 new_msgs.append("WiFi was down during part of your study session!")
         elif action == 'sleep' and self.student.action_status['sleep']:
@@ -198,6 +203,7 @@ bars = [
     StatusBar(bar_space*3 + bar_w*2, 60, bar_w, bar_h, "Health", message_font),
     StatusBar(bar_space*4 + bar_w*3, 60, bar_w, bar_h, "Stress", message_font),
     StatusBar(bar_space*5 + bar_w*4, 60, bar_w, bar_h, "Motivation", message_font),
+    StatusBar(bar_space*6 + bar_w*5, 60, bar_w, bar_h, "Hunger", message_font),
 ]
 
 # Buttons
@@ -267,14 +273,21 @@ while running:
             elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
-                    replay_runner = ReplayRunner(student, day_actions, n, day_count)
+                    replay_runner = ReplayRunner(student, course_manager, day_actions, n, day_count)
                     messages = []
                     day_over = True
                     current_screen_state = DAY_END_SCREEN
 
             elif input_box.active:
-                hours = input_box.handle_event(event)
-                if hours is not None:
+                res = input_box.handle_event(event)
+                if res is not None:
+                    # Unpack if study (tuple), otherwise it's just a float
+                    if pending_action == 'study':
+                        hours, target_course = res
+                    else:
+                        hours = res
+                        target_course = None
+
                     t_before = time_of_day
                     t_after  = time_of_day + hours
 
@@ -284,7 +297,8 @@ while running:
 
                     new_messages.extend(student.apply_hunger_decay(hours))
                     if pending_action == 'study':
-                        new_messages.extend(student.study(hours=hours, wifi_penalty=wifi_affected))
+                        avg_k = course_manager.get_average_knowledge()
+                        new_messages.extend(student.study(course=target_course, hours=hours, avg_knowledge=avg_k, wifi_penalty=wifi_affected))
                     elif pending_action == 'sleep':
                         new_messages.extend(student.rest(hours=hours))
                     elif pending_action == 'relax':
@@ -321,7 +335,8 @@ while running:
                 if study_btn.clicked(event):
                     pending_action = 'study'
                     cap = min(student.max_hours('study'), remaining_hours)
-                    input_box.open('study', cap)
+                    # Pass all courses for selection
+                    input_box.open('study', cap, courses=course_manager.courses)
 
                 if sleep_btn.clicked(event):
                     pending_action = 'sleep'
@@ -394,7 +409,7 @@ while running:
             elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
-                    replay_runner = ReplayRunner(student, day_actions, n, day_count)
+                    replay_runner = ReplayRunner(student, course_manager, day_actions, n, day_count)
                     messages = []
 
             else:
@@ -445,13 +460,19 @@ while running:
         wizard.draw(screen)
 
     elif current_screen_state == GAME_SCREEN:
+        avg_k = course_manager.get_average_knowledge()
         game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
+        # Manually draw bars[0] (Knowledge) with the calculated average
+        bars[0].draw(screen, avg_k)
+        
         input_box.draw(screen)
         repeat_box.draw(screen)
         alert_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
+        avg_k = course_manager.get_average_knowledge()
         game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
+        bars[0].draw(screen, avg_k)
         # Draw day-end overlay
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))

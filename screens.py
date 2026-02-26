@@ -13,11 +13,12 @@ def game_screen(screen, background_image, student, bars, buttons, messages, mess
         screen.blit(msg_surface, (30, y_offset))
         y_offset += 30
 
-    bars[0].draw(screen, student.knowledge)
+    # bars[0] (Knowledge) is drawn separately in main.py to show average
     bars[1].draw(screen, student.sleep)
     bars[2].draw(screen, student.health)
     bars[3].draw(screen, student.stress)
     bars[4].draw(screen, student.motivation)
+    bars[5].draw(screen, student.hunger)
 
     for button in buttons:
         button.draw(screen)
