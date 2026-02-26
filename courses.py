@@ -1,29 +1,31 @@
 import random
 
 class Course:
-   def __init__(self, name, credits, course_type="Theory", max_lab_evaluations=0):
-    self.name = name
-    self.credits = credits
-    self.course_type = course_type
+    def __init__(self, name, credits, course_type="Theory", max_lab_evaluations=0,
+                 total_classes=0, schedule="weekly"):
+        self.name = name
+        self.credits = credits
+        self.course_type = course_type
+        self.schedule = schedule           # "weekly" or "biweekly"
 
-    self.knowledge = 0.0
+        self.knowledge = 0.0
 
-    # Attendance
-    self.total_classes = total_classes
-    self.attended_classes = 0
+        # Attendance
+        self.total_classes = total_classes
+        self.attended_classes = 0
 
-    # Theory
-    self.quiz_marks = []
-    self.mid_mark = None
-    self.final_mark = None
+        # Theory
+        self.quiz_marks = []
+        self.mid_mark = None
+        self.final_mark = None
 
-    # Lab
-    self.lab_evaluations = []
-    self.lab_mid = None
-    self.lab_final = None
-    self.max_lab_evaluations = max_lab_evaluations
+        # Lab
+        self.lab_evaluations = []
+        self.lab_mid = None
+        self.lab_final = None
+        self.max_lab_evaluations = max_lab_evaluations
 
-    self.grade_point = 0.0
+        self.grade_point = 0.0
 
 
     def add_knowledge(self, amount):
@@ -213,10 +215,38 @@ class CourseManager:
     def __init__(self):
         self.courses = []
 
-    def add_course(self, name, credits, course_type="Theory", max_lab_evaluations=0):
+    def add_course(self, name, credits, course_type="Theory", max_lab_evaluations=0,
+                   total_classes=0, schedule="weekly"):
         self.courses.append(
-        Course(name, credits, course_type, max_lab_evaluations)
-    )
+            Course(name, credits, course_type, max_lab_evaluations,
+                   total_classes=total_classes, schedule=schedule)
+        )
+
+    def setup_from_wizard(self, result: dict):
+        """Populate courses from the wizard result dict."""
+        self.courses = []
+
+        for c in result.get("courses", []):
+            # Weekly theory: ~3 classes/week × 16 weeks = 48 total
+            self.add_course(
+                name=c["name"],
+                credits=c["credits"],
+                course_type="Theory",
+                total_classes=48,
+                schedule="weekly",
+            )
+
+        for lab in result.get("labs", []):
+            # Weekly lab: 1/week × 16 = 16; biweekly: 1/2-weeks × 16 = 8
+            classes = 16 if lab["schedule"] == "weekly" else 8
+            self.add_course(
+                name=lab["name"],
+                credits=lab["credits"],
+                course_type="Lab",
+                max_lab_evaluations=classes,
+                total_classes=classes,
+                schedule=lab["schedule"],
+            )
 
     def calculate_cgpa(self):
         total_points = 0

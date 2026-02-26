@@ -1,7 +1,9 @@
 import math
 
 class Student:
-    def __init__(self):
+    def __init__(self, student_type: str = "Average"):
+        self.student_type = student_type          # "Good", "Average", or "Bad"
+
         # Status bars
         self.knowledge = 30
         self.sleep = 70
@@ -26,8 +28,9 @@ class Student:
         self.consecutive_stress_days = 0
         self.burnout_days_remaining = 5
 
-        # Action rates 
-        self.study_knowledge_rate =  5    
+        # Action rates
+        _type_mult = {"Good": 1.4, "Average": 1.0, "Bad": 0.7}.get(student_type, 1.0)
+        self.study_knowledge_rate = 5 * _type_mult
         self.study_sleep_rate =  8    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   

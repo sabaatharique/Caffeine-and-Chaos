@@ -1,7 +1,8 @@
 import pygame
 import sys
 from student import Student
-from ui import StatusBar, Button, InputBox, NumberBox, AlertBox
+from courses import CourseManager
+from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard
 from screens import main_menu, game_screen
 from events import wifi_failure_event
 
@@ -35,6 +36,7 @@ def format_time(hour):
 print(f"Time of day: {format_time(time_of_day)}")
 
 student = Student()
+course_manager = CourseManager()
 
 day_actions = []
 # Outages for the current live day (list of {"start": h, "duration": h})
@@ -160,6 +162,7 @@ class ReplayRunner:
 
 # Game states
 MAIN_MENU = "main_menu"
+SETUP_SCREEN = "setup_screen"
 GAME_SCREEN = "game_screen"
 DAY_END_SCREEN = "day_end_screen"
 current_screen_state = MAIN_MENU
@@ -182,6 +185,7 @@ input_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 input_box = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
 alert_box = AlertBox(message_font, input_font)
+wizard = SetupWizard(message_font, input_font, button_font)
 pending_action = None  
 
 # Status bars
@@ -243,6 +247,15 @@ while running:
 
         if current_screen_state == MAIN_MENU:
             if start_btn.clicked(event):
+                wizard.reset()
+                current_screen_state = SETUP_SCREEN
+
+        elif current_screen_state == SETUP_SCREEN:
+            wizard.handle_event(event)
+            if wizard.done:
+                # Initialize student and courses with wizard results
+                student = Student(student_type=wizard.result["student_type"])
+                course_manager.setup_from_wizard(wizard.result)
                 current_screen_state = GAME_SCREEN
 
         elif current_screen_state == GAME_SCREEN:
@@ -427,6 +440,9 @@ while running:
 
     if current_screen_state == MAIN_MENU:
         main_menu(screen, main_bg, start_btn)
+
+    elif current_screen_state == SETUP_SCREEN:
+        wizard.draw(screen)
 
     elif current_screen_state == GAME_SCREEN:
         game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font)
