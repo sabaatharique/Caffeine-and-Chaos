@@ -5,8 +5,7 @@ class Student:
         self.student_type = student_type          # "Good", "Average", or "Bad"
 
         # Status bars
-        self.sleep = 70
-        self.sleep = 70
+        self.sleep = 90
         self.health = 80
         self.stress = 30
         self.motivation = 60
@@ -14,8 +13,8 @@ class Student:
 
         # Hunger tracking
         self.hours_since_last_meal = 0.0  # resets to 0 when eating
-        self.hunger_decay_rate = 1.5      # base value added to hunger per half-life period
-        self.hunger_half_life = 4.0       # hours until decay period doubles
+        self.hunger_decay_rate = 2.0      # base value added to hunger per half-life period
+        self.hunger_half_life = 2.0       # hours until decay period doubles
 
         # WiFi state
         self.wifi_down = False            # set True during an outage
@@ -31,7 +30,7 @@ class Student:
 
         # Action rates
         _type_mult = {"Good": 1.4, "Average": 1.0, "Bad": 0.7}.get(student_type, 1.0)
-        self.study_knowledge_rate = 4 * _type_mult
+        self.study_knowledge_rate = 1 * _type_mult
         self.study_sleep_rate =  8    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   
@@ -41,7 +40,8 @@ class Student:
         self.rest_health_rate = 3    
         self.rest_health_rate = 3    
 
-        self.relax_stress_rate = 8    
+        self.relax_stress_rate = 8 
+        self.relax_sleep_rate = 3       
         self.relax_motivation_rate = 5    
 
         self.eat_health_gain = 10    
@@ -226,6 +226,7 @@ class Student:
     def take_break(self, hours=1.0):
         messages = []
         self.stress -= hours * self.relax_stress_rate
+        self.sleep -= hours * self.relax_sleep_rate
         self.motivation += hours * self.relax_motivation_rate
 
         messages.extend(self.clamp())

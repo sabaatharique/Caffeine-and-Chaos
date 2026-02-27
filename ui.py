@@ -420,11 +420,31 @@ class AlertBox:
         self.active = False
         self.title = ""
         self.body = ""
+        self.color_type = "red"  # "red" or "yellow"
+        
+        # Color themes
+        self._themes = {
+            "red": {
+                "bg": (60, 20, 20),
+                "border": (255, 80, 80),
+                "title": (255, 80, 80),
+                "btn": (180, 40, 40),
+                "btn_border": (255, 120, 120)
+            },
+            "yellow": {
+                "bg": (60, 60, 20),
+                "border": (255, 220, 0),
+                "title": (255, 220, 0),
+                "btn": (180, 160, 40),
+                "btn_border": (255, 230, 120)
+            }
+        }
 
-    def open(self, title: str, body: str):
+    def open(self, title: str, body: str, color_type: str = "red"):
         self.active = True
         self.title = title
         self.body = body
+        self.color_type = color_type if color_type in self._themes else "red"
 
     def handle_event(self, event):
         if not self.active:
@@ -443,35 +463,40 @@ class AlertBox:
         if not self.active:
             return
 
+        theme = self._themes[self.color_type]
+
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
         screen.blit(overlay, (0, 0))
 
-        box_w, box_h = 420, 200
+        box_w, box_h = 540, 220 
         box_x = (screen.get_width() - box_w) // 2
         box_y = (screen.get_height() - box_h) // 2
         box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
 
-        pygame.draw.rect(screen, (60, 20, 20), box_rect, border_radius=10)
-        pygame.draw.rect(screen, (255, 80, 80), box_rect, 2, border_radius=10)
+        pygame.draw.rect(screen, theme["bg"], box_rect, border_radius=10)
+        pygame.draw.rect(screen, theme["border"], box_rect, 2, border_radius=10)
 
-        # Title
-        title_surf = self.font.render(self.title, True, (255, 80, 80))
-        screen.blit(title_surf, title_surf.get_rect(centerx=box_rect.centerx, y=box_y + 18))
+        # Title 
+        title_surf = self.font.render(self.title, True, theme["title"])
+        screen.blit(title_surf, title_surf.get_rect(centerx=box_rect.centerx, y=box_y + 20))
 
-        # Body  (wrap at ~50 chars manually if needed)
-        body_surf = self.smallfont.render(self.body, True, (220, 220, 220))
-        screen.blit(body_surf, body_surf.get_rect(centerx=box_rect.centerx, y=box_y + 58))
+        # Body  (split into lines for multi-line support)
+        lines = self.body.split('\n')
+        line_height = 28 
+        for i, line in enumerate(lines):
+            body_surf = self.smallfont.render(line.strip(), True, (240, 240, 240))
+            screen.blit(body_surf, body_surf.get_rect(centerx=box_rect.centerx, y=box_y + 65 + i * line_height))
 
         # Continue button
-        btn_w, btn_h = 120, 36
+        btn_w, btn_h = 140, 40
         self._btn_rect = pygame.Rect(
             box_rect.centerx - btn_w // 2,
-            box_y + box_h - btn_h - 16,
+            box_y + box_h - btn_h - 20,
             btn_w, btn_h
         )
-        pygame.draw.rect(screen, (180, 40, 40), self._btn_rect, border_radius=6)
-        pygame.draw.rect(screen, (255, 120, 120), self._btn_rect, 2, border_radius=6)
+        pygame.draw.rect(screen, theme["btn"], self._btn_rect, border_radius=6)
+        pygame.draw.rect(screen, theme["btn_border"], self._btn_rect, 2, border_radius=6)
         btn_surf = self.smallfont.render("Continue  [Enter]", True, (255, 255, 255))
         screen.blit(btn_surf, btn_surf.get_rect(center=self._btn_rect.center))
         

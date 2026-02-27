@@ -35,6 +35,24 @@ def format_time(hour):
 
 print(f"Time of day: {format_time(time_of_day)}")
 
+def draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space):
+    clock_color = (255, 255, 0)
+    time_str = format_time(time_of_day)
+    time_surf = clock_font.render(time_str, True, clock_color)
+    day_surf = date_font.render(f"Day {day_count}", True, clock_color)
+    
+    box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
+    box_h = time_surf.get_height() + day_surf.get_height() + 5
+    box_x = WIDTH - bar_space - box_w
+    box_y = 95
+    
+    clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    clock_bg.fill((0, 0, 0, 180))
+    screen.blit(clock_bg, (box_x, box_y))
+    
+    screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
+    screen.blit(day_surf, (box_x + box_w - day_surf.get_width() - 10, 100 + time_surf.get_height() - 10))
+
 student = Student()
 course_manager = CourseManager()
 
@@ -126,7 +144,16 @@ class ReplayRunner:
                 at_time = format_time(outage["start"])
                 title = f"WiFi Outage!"
                 body  = (f"At {at_time} on Day {self.current_day}, wifi went down for {dur_min} minutes.")
-                return [], (title, body)
+                
+                # Check for study session interruption
+                o_start = outage["start"]
+                o_end = o_start + outage["duration"]
+                overlap = max(0.0, min(action_end, o_end) - max(action_start, o_start))
+                if overlap > 0 and action == 'study':
+                    interrupted_min = round(overlap * 60)
+                    body += f"\nYour study session was interrupted for {interrupted_min} minutes."
+
+                return [], (title, body, "yellow")
 
         # Run the action
         new_msgs = []
@@ -192,7 +219,9 @@ message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
 input_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 input_box = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
-alert_box = AlertBox(message_font, input_font)
+alert_title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 28)
+alert_body_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+alert_box = AlertBox(alert_title_font, alert_body_font)
 wizard = SetupWizard(message_font, input_font, button_font)
 clock_font = pygame.font.Font("assets/fonts/Digital-7.ttf", 50)
 date_font = pygame.font.Font("assets/fonts/Digital-7.ttf", 35)
@@ -314,7 +343,8 @@ while running:
                         dur_min = round(overlap * 60)
                         alert_box.open(
                             f"WiFi Outage  -  Day {day_count}",
-                            f"WiFi was down for {dur_min} minutes during your {pending_action} session!"
+                            f"WiFi was down for {dur_min} minutes during your {pending_action} session!",
+                            color_type="yellow"
                         )
                     current_game_bg = bg_map.get(pending_action, bg_map['default'])
                     record_action(pending_action, hours, target_course)
@@ -476,59 +506,34 @@ while running:
         # Manually draw bars[0] (Knowledge) with the calculated average
         bars[0].draw(screen, avg_k)
         
-        # Draw Digital Clock (Time and Day)
-        clock_color = (255, 255, 0) # Neon Cyan
-        time_str = format_time(time_of_day)
-        time_surf = clock_font.render(time_str, True, clock_color)
-        day_surf = date_font.render(f"Day {day_count}", True, clock_color)
-        
-        # Calculate box dimensions
-        box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
-        box_h = time_surf.get_height() + day_surf.get_height() + 5
-        # Align right edge with last bar right edge (WIDTH - bar_space)
-        box_x = WIDTH - bar_space - box_w
-        box_y = 95
-        
-        # Draw semi-transparent background box
-        clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        clock_bg.fill((0, 0, 0, 180)) # Dark semi-transparent
-        screen.blit(clock_bg, (box_x, box_y))
-        
-        # Draw text surfaces, aligned to the right inside the box
-        screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
-        screen.blit(day_surf, (box_x + box_w - day_surf.get_width() - 10, 100 + time_surf.get_height() - 10))
+        draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space)
 
         input_box.draw(screen)
         repeat_box.draw(screen)
         alert_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
-        avg_k = course_manager.get_average_knowledge()
+        # Draw game screen first (background and base UI)
         game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font, bar_space)
-        bars[0].draw(screen, avg_k)
-
-        # Draw Digital Clock even on summary screen
-        clock_color = (255, 255, 0)
-        time_str = format_time(time_of_day)
-        time_surf = clock_font.render(time_str, True, clock_color)
-        day_surf = date_font.render(f"Day {day_count}", True, clock_color)
         
-        box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
-        box_h = time_surf.get_height() + day_surf.get_height() + 5
-        box_x = WIDTH - bar_space - box_w
-        box_y = 95
-        
-        clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        clock_bg.fill((0, 0, 0, 180))
-        screen.blit(clock_bg, (box_x, box_y))
-        
-        screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
-        screen.blit(day_surf, (box_x + box_w - day_surf.get_width() - 10, 100 + time_surf.get_height() - 10))
+        # Draw clock BEFORE overlay so it is dimmed
+        draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space)
 
         # Draw day-end overlay
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))
         screen.blit(overlay, (0, 0))
+
+        # Re-draw status bars AFTER overlay to keep them bright
+        avg_k = course_manager.get_average_knowledge()
+        for bar in bars:
+            bar.draw(screen, avg_k if bar.label == "Knowledge" else
+                             student.sleep if bar.label=="Sleep" else 
+                             student.health if bar.label=="Health" else
+                             student.stress if bar.label=="Stress" else
+                             student.motivation if bar.label=="Motivation" else
+                             student.hunger if bar.label=="Hunger" else 0)
+        
         title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 32)
         title_surf = title_font.render(f"Day {day_count} Complete!", True, (255, 255, 255))
         screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, HEIGHT // 2 - 60))
