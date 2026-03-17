@@ -21,16 +21,20 @@ def format_time(hour: float) -> str:
 
 
 def draw_clock(screen, clock_font, date_font, time_of_day: float,
-               day_count: int, bar_space: int) -> None:
-    """Render the digital clock + day counter in the top-right area."""
+               day_count: int, bar_space: int, week_count: int = 1,
+               day_in_week: int = 1) -> None:
+    """Render the digital clock + day + week counter in the top-right area."""
     WIDTH = screen.get_width()
     clock_color = (255, 255, 0)
     time_str  = format_time(time_of_day)
-    time_surf = clock_font.render(time_str, True, clock_color)
-    day_surf  = date_font.render(f"Day {day_count}", True, clock_color)
+    time_surf  = clock_font.render(time_str, True, clock_color)
+    day_surf   = date_font.render(f"Day {day_count}", True, clock_color)
+    week_surf  = date_font.render(f"Wk {week_count}  D{day_in_week} of 7", True, clock_color)
 
-    box_w = max(time_surf.get_width(), day_surf.get_width()) + 20
-    box_h = time_surf.get_height() + day_surf.get_height() + 5
+    box_w = max(time_surf.get_width(), day_surf.get_width(),
+                week_surf.get_width()) + 20
+    box_h = (time_surf.get_height() + day_surf.get_height()
+             + week_surf.get_height() + 5)
     box_x = WIDTH - bar_space - box_w
     box_y = 95
 
@@ -38,9 +42,12 @@ def draw_clock(screen, clock_font, date_font, time_of_day: float,
     clock_bg.fill((0, 0, 0, 180))
     screen.blit(clock_bg, (box_x, box_y))
 
-    screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, 100))
-    screen.blit(day_surf,  (box_x + box_w - day_surf.get_width()  - 10,
-                             100 + time_surf.get_height() - 10))
+    y = 100
+    screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, y))
+    y += time_surf.get_height() - 10
+    screen.blit(day_surf,  (box_x + box_w - day_surf.get_width()  - 10, y))
+    y += day_surf.get_height() - 4
+    screen.blit(week_surf, (box_x + box_w - week_surf.get_width() - 10, y))
 
 
 def outage_overlap(outages: list, t_start: float, t_end: float) -> float:
