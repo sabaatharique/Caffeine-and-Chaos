@@ -452,7 +452,7 @@ while running:
         elif current_screen_state == SETUP_SCREEN:
             wizard.handle_event(event)
             if wizard.done:
-                student = Student(student_type=wizard.result["student_type"])
+                student = Student(type_mult=wizard.result["type_mult"])
                 course_manager.setup_from_wizard(wizard.result)
                 current_screen_state = GAME_SCREEN
 
