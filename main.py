@@ -23,6 +23,12 @@ day_count     = 1
 day_over      = False
 burnout_active = False   # True while student is recovering from burnout
 
+# Week tracking
+week_count    = 1        # current week number (starts at 1)
+day_in_week   = 1        # day within the current week (1-7)
+week_actions: list[list] = []  # accumulated per-day action lists for current week
+_current_day_actions_snapshot: list = []  # snapshot of day_actions at week-day start
+
 print(f"Time of day: {format_time(time_of_day)}")
 
 student        = Student()
@@ -30,6 +36,7 @@ course_manager = CourseManager()
 
 day_actions  = []
 daily_outages = wifi_failure_event()
+week_replay_runner: "WeekReplayRunner | None" = None
 
 
 def record_action(action: str, hours: float, data=None):
@@ -156,6 +163,161 @@ class ReplayRunner:
         return self.msgs[-n:]
 
 
+# Week Replay State Machine
+class WeekReplayRunner:
+    """Replays a recorded week (up to 7 day-action-lists) for N additional weeks."""
+
+    def __init__(self, student, course_manager, week_actions, n_weeks, start_day, start_week):
+        """
+        week_actions: list of up to 7 lists, each being the day_actions for that day.
+        n_weeks:      how many additional weeks to replay.
+        start_day:    day_count at the start of the replay.
+        start_week:   week_count at the start of the replay.
+        """
+        self.student = student
+        self.course_manager = course_manager
+        # Deep-copy each day's action list so originals are untouched
+        self.week_actions = [list(d) for d in week_actions]
+        self.total_weeks  = n_weeks
+        self.weeks_done   = 0
+        self.current_day  = start_day
+        self.current_week = start_week
+        self.day_in_week  = 0          # 0-indexed within the replaying week
+        self.action_idx   = 0
+        self.time_cursor  = float(DAY_START)
+
+        self.pending_alert = None
+        self.msgs = []
+        self.done = False
+        self.burnout_occurred = False
+
+        self._day_outages = wifi_failure_event()
+        self._outage_idx  = 0
+
+        self._start_new_day()
+
+    #  helpers
+    def _start_new_day(self):
+        self.current_day   += 1
+        self.action_idx     = 0
+        self.time_cursor    = float(DAY_START)
+        self._day_outages   = wifi_failure_event()
+        self._outage_idx    = 0
+
+    def _start_new_week(self):
+        """Advance week counter and reset day pointer. Does NOT advance current_day."""
+        self.weeks_done   += 1
+        self.day_in_week   = 0
+        self.current_week += 1
+
+    @property
+    def current_day_in_week(self):
+        """1-based day index within the replaying week."""
+        return self.day_in_week + 1
+
+    # tick
+    def tick(self):
+        """Advance by one action; return (new_msgs, alert_info)."""
+        if self.done:
+            return [], None
+
+        # All weeks done?
+        if self.weeks_done >= self.total_weeks:
+            self.done = True
+            return [], None
+
+        # All days in this week done?
+        if self.day_in_week >= len(self.week_actions):
+            completed_week = self.current_week
+            self._start_new_week()   # bumps weeks_done, current_week; does NOT touch current_day
+            if self.weeks_done >= self.total_weeks:
+                self.done = True
+                return [f"Week {completed_week} completed (fast-forward)."], None
+            # More weeks to replay — start day 1 of next week
+            self._start_new_day()
+            msg = f"Week {completed_week} done! Week {self.current_week} begins (fast-forward)."
+            self.msgs.append(msg)
+            return [msg], None
+
+        actions = self.week_actions[self.day_in_week]
+
+        # All actions for this day done?
+        if self.action_idx >= len(actions):
+            day_msgs = self.student.end_of_day()
+            self.msgs.extend(day_msgs)
+            self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
+            if any("Burnout!" in m for m in day_msgs):
+                self.burnout_occurred = True
+                self.done = True
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+            self.day_in_week += 1
+            # Only start next day now if there are more days this week;
+            # otherwise let the week-boundary tick handle it cleanly.
+            if self.day_in_week < len(self.week_actions):
+                self._start_new_day()
+            return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+
+        action, hours, data = actions[self.action_idx]
+        action_start = self.time_cursor
+        action_end   = self.time_cursor + hours
+
+        # WiFi outage interrupt
+        if self._outage_idx < len(self._day_outages):
+            outage = self._day_outages[self._outage_idx]
+            if outage["start"] < action_end:
+                self._outage_idx += 1
+                dur_min = round(outage["duration"] * 60)
+                at_time = format_time(outage["start"])
+                title = "WiFi Outage!"
+                body  = (f"At {at_time} on Day {self.current_day}, "
+                         f"wifi went down for {dur_min} minutes.")
+                o_end   = outage["start"] + outage["duration"]
+                overlap = max(0.0, min(action_end, o_end) - max(action_start, outage["start"]))
+                if overlap > 0 and action == 'study':
+                    body += f"\nYour study session was interrupted for {round(overlap*60)} minutes."
+                return [], (title, body, "yellow")
+
+        # Run action
+        new_msgs = []
+        overlap  = outage_overlap(self._day_outages, action_start, action_end)
+        wifi_on  = (overlap > 0 and action == 'study')
+
+        if action == 'study' and self.student.action_status['study']:
+            target = data if data else next(
+                (c for c in self.course_manager.courses if c.course_type == "Theory"),
+                self.course_manager.courses[0]
+            )
+            avg = self.course_manager.get_average_knowledge()
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.study(course=target, hours=hours,
+                                                avg_knowledge=avg, wifi_penalty=wifi_on))
+            if wifi_on:
+                new_msgs.append("WiFi was down during part of your study session!")
+        elif action == 'sleep' and self.student.action_status['sleep']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.rest(hours=hours))
+        elif action == 'relax' and self.student.action_status['relax']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.take_break(hours=hours))
+        elif action == 'eat' and self.student.action_status['eat']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.5))
+            new_msgs.extend(self.student.eat())
+        elif action == 'coffee' and self.student.action_status['coffee']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.25))
+            new_msgs.extend(self.student.drink_coffee())
+
+        self.time_cursor  = action_end
+        self.action_idx  += 1
+        self.msgs.extend(new_msgs)
+
+        pygame.time.wait(200)   # slight pause so replay is watchable
+        return new_msgs, None
+
+    def last_msgs(self, n=5):
+        return self.msgs[-n:]
+
+
+
 # Game states
 MAIN_MENU = "main_menu"
 SETUP_SCREEN = "setup_screen"
@@ -218,11 +380,17 @@ drink_coffee_btn= Button(btn_space*4 + btn_w*3,  HEIGHT - 80, btn_w, btn_h, "Cof
 eat_btn         = Button(btn_space*5 + btn_w*4,  HEIGHT - 80, btn_w, btn_h, "Food",   button_font)
 game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
-# Day-end buttons
-_btn_y      = HEIGHT // 2 + 40
-continue_btn = Button(WIDTH // 2 - 196, _btn_y, 114, 40, "Continue", button_font)
-repeat_btn   = Button(WIDTH // 2 -  57, _btn_y, 114, 40, "Repeat",   button_font)
-quit_btn     = Button(WIDTH // 2 +  82, _btn_y, 114, 40, "Quit",     button_font)
+# Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
+_btn_y      = HEIGHT // 2 + 50
+_btn_w      = 120
+_total_btns = 4
+_gap        = (WIDTH - _total_btns * _btn_w) // (_total_btns + 1)
+continue_btn     = Button(_gap,                        _btn_y, _btn_w, 40, "Continue",    button_font)
+repeat_btn       = Button(_gap * 2 + _btn_w,           _btn_y, _btn_w, 40, "Repeat Day",  button_font)
+repeat_week_btn  = Button(_gap * 3 + _btn_w * 2,       _btn_y, _btn_w, 40, "Repeat Week", button_font)
+quit_btn         = Button(_gap * 4 + _btn_w * 3,       _btn_y, _btn_w, 40, "Quit",        button_font)
+
+week_repeat_box = NumberBox(message_font, input_font)
 
 messages: list[str]              = []
 replay_runner: ReplayRunner | None = None
@@ -251,6 +419,10 @@ running = True
 while running:
     remaining_hours = DAY_END - time_of_day
 
+    # Derive week tracking from day_count (always consistent, works with any runner)
+    day_in_week = ((day_count - 1) % 7) + 1   # 1-7
+    week_count  = ((day_count - 1) // 7) + 1  # 1, 2, ...
+
     # -- Button enable state --
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
@@ -262,7 +434,8 @@ while running:
         eat_btn.enabled          = student.action_status['eat']    and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
 
-    repeat_btn.enabled = not burnout_active
+    repeat_btn.enabled      = not burnout_active
+    repeat_week_btn.enabled = not burnout_active and day_in_week == 7
 
     # Event handling
     for event in pygame.event.get():
@@ -279,7 +452,7 @@ while running:
         elif current_screen_state == SETUP_SCREEN:
             wizard.handle_event(event)
             if wizard.done:
-                student = Student(student_type=wizard.result["student_type"])
+                student = Student(type_mult=wizard.result["type_mult"])
                 course_manager.setup_from_wizard(wizard.result)
                 current_screen_state = GAME_SCREEN
 
@@ -385,16 +558,40 @@ while running:
             # AlertBox intercepts all input while active during replay 
             if alert_box.active:
                 dismissed = alert_box.handle_event(event)
-                # After dismissal, tick the runner once more to continue
-                if dismissed and replay_runner and not replay_runner.done:
-                    step_msgs, alert_info = replay_runner.tick()
-                    if alert_info:
-                        alert_box.open(*alert_info)
-                    messages   = replay_runner.last_msgs()
-                    day_count  = replay_runner.current_day
-                    time_of_day = replay_runner.time_cursor
-                    if replay_runner.done and replay_runner.burnout_occurred:
-                        burnout_active = True
+                # After dismissal, tick the active runner to continue
+                if dismissed:
+                    if replay_runner and not replay_runner.done:
+                        step_msgs, alert_info = replay_runner.tick()
+                        if alert_info:
+                            alert_box.open(*alert_info)
+                        messages   = replay_runner.last_msgs()
+                        day_count  = replay_runner.current_day
+                        time_of_day = replay_runner.time_cursor
+                        if replay_runner.done and replay_runner.burnout_occurred:
+                            burnout_active = True
+                    elif week_replay_runner and not week_replay_runner.done:
+                        step_msgs, alert_info = week_replay_runner.tick()
+                        if alert_info:
+                            alert_box.open(*alert_info)
+                        messages    = week_replay_runner.last_msgs()
+                        day_count   = week_replay_runner.current_day
+                        week_count  = week_replay_runner.current_week
+                        day_in_week = week_replay_runner.current_day_in_week
+                        time_of_day = week_replay_runner.time_cursor
+                        if week_replay_runner.done and week_replay_runner.burnout_occurred:
+                            burnout_active = True
+
+            elif week_repeat_box.active:
+                n = week_repeat_box.handle_event(event)
+                if n is not None:
+                    # Full week = previous days + today (the 7th day)
+                    full_week = list(week_actions) + [list(day_actions)]
+                    week_replay_runner = WeekReplayRunner(
+                        student, course_manager,
+                        full_week, n,
+                        day_count, week_count
+                    )
+                    messages = []
 
             elif repeat_box.active:
                 n = repeat_box.handle_event(event)
@@ -405,14 +602,23 @@ while running:
             else:
                 if continue_btn.clicked(event):
                     replay_runner = None
+                    week_replay_runner = None
+                    # Save or reset week_actions based on current day
+                    if day_in_week == 7:      # completed last day of the week
+                        week_actions.clear()  # fresh start for next week
+                    else:
+                        week_actions.append(list(day_actions))  # save for week replay
                     day_count += 1
+                    # day_in_week / week_count re-derived next frame from new day_count
                     time_of_day = DAY_START
                     day_over = False
                     day_actions.clear()
                     current_game_bg = bg_map['default']
-                    daily_outages = wifi_failure_event()  # generate new outages for next live day
-                    messages = [f"Day {day_count} begins!"]
-                    print(f"\n--- Day {day_count} ---")
+                    daily_outages = wifi_failure_event()
+                    new_diy = ((day_count - 1) % 7) + 1
+                    new_wk  = ((day_count - 1) // 7) + 1
+                    messages = [f"Week {new_wk} - Day {new_diy} begins!"]
+                    print(f"\n--- Week {new_wk} - Day {new_diy} (Day {day_count}) ---")
                     print(f"Time of day: {format_time(time_of_day)}")
                     current_screen_state = GAME_SCREEN
 
@@ -422,14 +628,25 @@ while running:
                     else:
                         messages = ["No actions recorded to repeat."]
 
+                if repeat_week_btn.clicked(event) and day_in_week == 7:
+                    if week_actions or day_actions:
+                        # Build full 7-day snapshot (previous 6 days + today)
+                        _full_week_snapshot = list(week_actions) + [list(day_actions)]
+                        week_repeat_box.open("Repeat this week for how many more weeks?", max_value=52)
+                    else:
+                        messages = ["No actions recorded this week."]
+
                 if quit_btn.clicked(event):
                     running = False
 
+    # ── Active replay tick (day runner) ─────────────────────────────────
     if (current_screen_state == DAY_END_SCREEN
             and replay_runner is not None
             and not replay_runner.done
             and not alert_box.active
-            and not repeat_box.active):
+            and not repeat_box.active
+            and not week_repeat_box.active):
+        prev_day = replay_runner.current_day
         step_msgs, alert_info = replay_runner.tick()
         if alert_info:
             alert_box.open(*alert_info)
@@ -439,6 +656,31 @@ while running:
         if replay_runner.current_action:
             current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
         if replay_runner.done and replay_runner.burnout_occurred:
+            burnout_active = True
+        # Sync week_actions so weeks completed by replay are tracked
+        if day_count != prev_day:
+            new_diy = ((day_count - 1) % 7) + 1
+            if new_diy == 1:
+                week_actions.clear()  # week boundary crossed
+            else:
+                # Fill in any replayed days within this week
+                while len(week_actions) < new_diy - 1:
+                    week_actions.append(list(day_actions))
+
+    # ── Active replay tick (week runner) ────────────────────────────────
+    if (current_screen_state == DAY_END_SCREEN
+            and week_replay_runner is not None
+            and not week_replay_runner.done
+            and not alert_box.active
+            and not repeat_box.active
+            and not week_repeat_box.active):
+        step_msgs, alert_info = week_replay_runner.tick()
+        if alert_info:
+            alert_box.open(*alert_info)
+        messages = week_replay_runner.last_msgs()
+        day_count  = week_replay_runner.current_day   # day_in_week/week_count derived next frame
+        time_of_day = week_replay_runner.time_cursor
+        if week_replay_runner.done and week_replay_runner.burnout_occurred:
             burnout_active = True
 
     # Draw
@@ -456,7 +698,8 @@ while running:
         # Manually draw bars[0] (Knowledge) with the calculated average
         bars[0].draw(screen, avg_k)
         
-        draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space)
+        draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
+                   week_count=week_count, day_in_week=day_in_week)
 
         input_box.draw(screen)
         repeat_box.draw(screen)
@@ -472,6 +715,9 @@ while running:
             avg_k, burnout_active,
             continue_btn, repeat_btn, quit_btn,
             repeat_box, alert_box,
+            week_count=week_count, day_in_week=day_in_week,
+            repeat_week_btn=repeat_week_btn,
+            week_repeat_box=week_repeat_box,
         )
 
     pygame.display.flip()

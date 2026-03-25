@@ -44,7 +44,9 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
                    time_of_day, day_count,
                    avg_knowledge, burnout_active,
                    continue_btn, repeat_btn, quit_btn,
-                   repeat_box, alert_box):
+                   repeat_box, alert_box,
+                   week_count=1, day_in_week=1,
+                   repeat_week_btn=None, week_repeat_box=None):
     """Draw the full day-end overlay (background + dim + summary + buttons)."""
     WIDTH, HEIGHT = screen.get_width(), screen.get_height()
 
@@ -53,7 +55,8 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
                 messages, message_font, bar_space)
 
     # Clock before overlay so it gets dimmed with everything else
-    draw_clock_fn(screen, clock_font, date_font, time_of_day, day_count, bar_space)
+    draw_clock_fn(screen, clock_font, date_font, time_of_day, day_count, bar_space,
+                  week_count=week_count, day_in_week=day_in_week)
 
     # Dark overlay
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -75,7 +78,18 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
     # Title
     title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 32)
     title_surf = title_font.render(f"Day {day_count} Complete!", True, (255, 255, 255))
-    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, HEIGHT // 2 - 60))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, HEIGHT // 2 - 80))
+
+    # Week subtitle
+    week_label_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    if day_in_week == 7:
+        wk_label = f"Week {week_count}  |  Day {day_in_week} of 7  -  Week Complete!"
+        wk_color = (120, 255, 160)
+    else:
+        wk_label = f"Week {week_count}  |  Day {day_in_week} of 7"
+        wk_color = (180, 230, 255)
+    wk_surf = week_label_font.render(wk_label, True, wk_color)
+    screen.blit(wk_surf, (WIDTH // 2 - wk_surf.get_width() // 2, HEIGHT // 2 - 46))
 
     # Burnout notice OR continue prompt
     if burnout_active:
@@ -86,15 +100,22 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
         screen.blit(burnout_surf,
                     (WIDTH // 2 - burnout_surf.get_width() // 2, HEIGHT // 2 - 10))
     else:
-        prompt_surf = message_font.render(
-            "Continue, repeat today's actions, or quit?", True, (200, 200, 200)
-        )
+        if day_in_week == 7:
+            prompt_text = "Week complete! Continue, repeat day, repeat whole week, or quit?"
+        else:
+            days_left = 7 - day_in_week
+            prompt_text = f"Continue, repeat today, or quit?  ({days_left} day(s) until Repeat Week)"
+        prompt_surf = message_font.render(prompt_text, True, (200, 200, 200))
         screen.blit(prompt_surf,
-                    (WIDTH // 2 - prompt_surf.get_width() // 2, HEIGHT // 2 - 10))
+                    (WIDTH // 2 - prompt_surf.get_width() // 2, HEIGHT // 2 + 6))
 
     # Buttons & widgets
     continue_btn.draw(screen)
     repeat_btn.draw(screen)
+    if repeat_week_btn is not None:
+        repeat_week_btn.draw(screen)   # always drawn; enabled only on day 7
     quit_btn.draw(screen)
     repeat_box.draw(screen)
+    if week_repeat_box is not None:
+        week_repeat_box.draw(screen)
     alert_box.draw(screen)

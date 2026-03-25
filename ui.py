@@ -571,6 +571,81 @@ class ScheduleSelector:
             screen.blit(txt, txt.get_rect(center=rect.center))
 
 
+class Slider:
+    """Horizontal slider for picking a float value in [min_val, max_val]."""
+
+    def __init__(self, x, y, w, h, font, min_val=0.6, max_val=1.4, default=1.0,
+                 labels=None):
+        self.track_rect = pygame.Rect(x, y, w, h)
+        self.font = font
+        self.min_val = min_val
+        self.max_val = max_val
+        self.value = default
+        self.labels = labels or []
+        self._dragging = False
+        self.knob_r = h + 4
+        self._update_knob()
+
+    def _update_knob(self):
+        frac = (self.value - self.min_val) / (self.max_val - self.min_val)
+        self.knob_x = int(self.track_rect.x + frac * self.track_rect.w)
+        self.knob_y = self.track_rect.centery
+
+    def _set_from_x(self, x):
+        frac = (x - self.track_rect.x) / self.track_rect.w
+        frac = max(0.0, min(1.0, frac))
+        self.value = self.min_val + frac * (self.max_val - self.min_val)
+        self._update_knob()
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            kx, ky = self.knob_x, self.knob_y
+            mx, my = event.pos
+            if (mx - kx) ** 2 + (my - ky) ** 2 <= self.knob_r ** 2:
+                self._dragging = True
+            elif self.track_rect.collidepoint(mx, my):
+                self._set_from_x(mx)
+                self._dragging = True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._dragging = False
+        elif event.type == pygame.MOUSEMOTION and self._dragging:
+            self._set_from_x(event.pos[0])
+
+    def draw(self, screen):
+        tx, ty = self.track_rect.x, self.track_rect.y
+        tw, th = self.track_rect.w, self.track_rect.h
+        frac = (self.value - self.min_val) / (self.max_val - self.min_val)
+        fill_w = int(tw * frac)
+
+        # Track background
+        pygame.draw.rect(screen, (50, 50, 70), self.track_rect, border_radius=th // 2)
+
+        # Filled portion (red→green gradient by fraction)
+        if fill_w > 0:
+            r = int(220 * (1 - frac))
+            g = int(180 * frac)
+            fill_color = (r + 35, g + 60, 60)
+            fill_rect = pygame.Rect(tx, ty, fill_w, th)
+            pygame.draw.rect(screen, fill_color, fill_rect, border_radius=th // 2)
+
+        pygame.draw.rect(screen, (140, 140, 200), self.track_rect, 2, border_radius=th // 2)
+
+        # Tick marks
+        for val, text in self.labels:
+            frac_t = (val - self.min_val) / (self.max_val - self.min_val)
+            tick_x = int(tx + frac_t * tw)
+            pygame.draw.line(screen, (200, 200, 255),
+                             (tick_x, ty - 8), (tick_x, ty + th + 8), 2)
+            lbl = self.font.render(text, True, (200, 200, 255))
+            screen.blit(lbl, (tick_x - lbl.get_width() // 2, ty + th + 14))
+
+        # Knob
+        pygame.draw.circle(screen, (52, 200, 219), (self.knob_x, self.knob_y), self.knob_r)
+        pygame.draw.circle(screen, (255, 255, 255), (self.knob_x, self.knob_y), self.knob_r, 2)
+
+        # Value label removed
+
+
 class SetupWizard:
     def __init__(self, font, smallfont, btn_font):
         self.font = font
@@ -580,15 +655,12 @@ class SetupWizard:
         self.done = False
         self.step = 0 # 0: Student Type, 1: num_theory, 2: theory_form, 3: num_labs, 4: lab_form
         
-        self.result = {"student_type": "Average", "courses": [], "labs": []}
+        self.result = {"type_mult": 1.0, "courses": [], "labs": []}
 
-        # Step 0 Buttons
-        bw, bh = 150, 45
-        self.type_btns = [
-            Button(0, 0, bw, bh, "Good", btn_font),
-            Button(0, 0, bw, bh, "Average", btn_font),
-            Button(0, 0, bw, bh, "Bad", btn_font)
-        ]
+        # Step 0 Slider
+        labels = [(0.6, "Bad"), (1.0, "Average"), (1.4, "Good")]
+        self.type_slider = Slider(300, 300, 400, 15, font, min_val=0.6, max_val=1.4, labels=labels)
+        self.type_confirm_btn = Button(425, 420, 150, 45, "Confirm", btn_font)
         
         # Quantity screens
         self.qty_input = NumberBox(font, smallfont)
@@ -604,7 +676,7 @@ class SetupWizard:
         self.active = True
         self.done = False
         self.step = 0
-        self.result = {"student_type": "Average", "courses": [], "labs": []}
+        self.result = {"type_mult": 1.0, "courses": [], "labs": []}
         self._error = ""
 
     def _build_form(self, count, type="Theory"):
@@ -644,11 +716,11 @@ class SetupWizard:
         if not self.active: return
 
         if self.step == 0:
-            for i, btn in enumerate(self.type_btns):
-                if btn.clicked(event):
-                    self.result["student_type"] = ["Good", "Average", "Bad"][i]
-                    self.step = 1
-                    self.qty_input.open("How many theory courses?", max_value=8)
+            self.type_slider.handle_event(event)
+            if self.type_confirm_btn.clicked(event):
+                self.result["type_mult"] = self.type_slider.value
+                self.step = 1
+                self.qty_input.open("How many theory courses?", max_value=8)
 
         elif self.step == 1: # Qty Theory
             res = self.qty_input.handle_event(event)
@@ -748,13 +820,20 @@ class SetupWizard:
             screen.blit(surf, (screen.get_width()//2 - surf.get_width()//2, y))
 
         if self.step == 0:
-            draw_centered("Welcome! What type of student are you?", 120, title_font)
-            spacing = 200
-            start_x = (screen.get_width() - (3 * 150 + 2 * spacing)) // 2
-            for i, btn in enumerate(self.type_btns):
-                btn.rect.x = start_x + i * (150 + spacing)
-                btn.rect.y = 300
-                btn.draw(screen)
+            draw_centered("Welcome! Adjust your student potential:", 120, title_font)
+            # Center the slider and button
+            sw = screen.get_width()
+            self.type_slider.track_rect.x = sw // 2 - self.type_slider.track_rect.w // 2
+            self.type_slider.track_rect.y = 320
+            self.type_slider._update_knob()
+            self.type_slider.draw(screen)
+
+            self.type_confirm_btn.rect.x = sw // 2 - self.type_confirm_btn.rect.w // 2
+            self.type_confirm_btn.rect.y = 450
+            self.type_confirm_btn.draw(screen)
+            
+            # help_text = "Bad (0.7) means slower progress, Good (1.4) means faster."
+            # draw_centered(help_text, 200, self.smallfont, (180, 180, 220))
 
         elif self.step == 1 or self.step == 3:
             draw_centered("Almost there...", 150, title_font)
