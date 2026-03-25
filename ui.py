@@ -501,6 +501,301 @@ class AlertBox:
         screen.blit(btn_surf, btn_surf.get_rect(center=self._btn_rect.center))
         
 
+
+# Schedule Builder 
+# University timetable constants
+_DAYS   = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+_SLOTS  = [
+    ("8:00",  "9:15"),
+    ("9:15",  "10:30"),
+    ("10:30", "11:45"),
+    ("11:45", "1:00"),
+    ("1:00",  "2:30"),   
+    ("2:30",  "3:45"),
+    ("3:45",  "5:00"),
+]
+_LUNCH_IDX = 4   
+_CLASS_SLOTS = [i for i in range(len(_SLOTS)) if i != _LUNCH_IDX]  
+
+
+class ScheduleBuilder:
+    """Interactive Mon-Fri weekly timetable.
+    Usage
+    -----
+    builder = ScheduleBuilder(font, smallfont, btn_font)
+    builder.set_courses(all_courses)      # list of Course objects
+    # call handle_event / draw each frame
+    # when builder.confirmed → read builder.get_schedule()
+    """
+
+    _CELL_W = 100 # per time-slot column
+    _CELL_H = 72 # per day row
+    _HEADER_H = 32 # slot-label row height at top
+    _DAY_LABEL_W = 88 # width of the day-name column on the left
+    _SIDE_W = 155 # course panel width (right side)
+    _PAD = 12
+
+    # colour palette
+    _COL_HEADER = (30, 35, 55)
+    _COL_EMPTY = (22, 28, 48)
+    _COL_LUNCH = (28, 40, 28)
+    _COL_HOVER = (40, 55, 80)
+    _COL_BORDER = (60, 70, 100)
+    _COL_LUNCH_BORDER = (40, 100, 60)
+    _COL_SEL_PANEL_BG = (18, 20, 38)
+    _COL_TEXT = (220, 225, 245)
+    _COL_LUNCH_TEXT = (80, 200, 120)
+
+    # 10 distinct pastel colours for course assignment
+    _COURSE_COLORS = [
+        (82,  130, 200), (200, 100,  80), (100, 180, 120),
+        (200, 160,  60), (150,  90, 200), ( 60, 180, 200),
+        (200,  80, 150), (130, 200,  70), (190, 120,  60),
+        ( 80, 160, 190),
+    ]
+
+    def __init__(self, font, smallfont, btn_font):
+        self.font = font
+        self.smallfont = smallfont
+        self.btn_font = btn_font
+
+        self.courses: list = []
+        self.selected_course = None # Course currently "held"
+        # grid[day_idx][slot_idx] = Course or None  (pre-sized so draw() is safe before set_courses())
+        self.grid: list[list] = [[None] * len(_SLOTS) for _ in range(len(_DAYS))]
+        self._color_map: dict = {} # course → rgb tuple
+        self.confirmed = False
+        self._hover_cell = None # (day, slot) under mouse
+
+        self._confirm_btn = Button(0, 0, 180, 42, "Confirm Schedule", btn_font)
+        self._clear_btn = Button(0, 0, 120, 42, "Clear Cell", btn_font)
+        self._skip_btn = Button(0, 0, 120, 42, "Skip", btn_font)
+
+        # computed layout (set in draw)
+        self._grid_rect = None
+        self._cell_rects: list[list] = [] # [day][slot] → Rect
+        self._course_rects: list = [] # sidebar rects
+
+    def set_courses(self, courses: list):
+        self.courses = list(courses)
+        self.grid = [[None] * len(_SLOTS) for _ in range(len(_DAYS))]
+        self._color_map = {
+            c: self._COURSE_COLORS[i % len(self._COURSE_COLORS)]
+            for i, c in enumerate(self.courses)
+        }
+        self.selected_course = self.courses[0] if self.courses else None
+        self.confirmed = False
+        self._hover_cell = None
+
+    def get_schedule(self) -> dict:
+        """Return {(day_idx, slot_idx): Course} for all filled cells."""
+        out = {}
+        for d, day_row in enumerate(self.grid):
+            for s, course in enumerate(day_row):
+                if course is not None:
+                    out[(d, s)] = course
+        return out
+
+    # events
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            self._hover_cell = self._cell_at(mx, my)
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+
+            # Sidebar course selection
+            for i, rect in enumerate(self._course_rects):
+                if rect.collidepoint(mx, my):
+                    self.selected_course = self.courses[i]
+                    return
+
+            # Grid cell click
+            cell = self._cell_at(mx, my)
+            if cell:
+                d, s = cell
+                if s == _LUNCH_IDX:
+                    return   # can't assign to lunch
+                if self.selected_course is not None:
+                    # toggle off if same course already there
+                    if self.grid[d][s] == self.selected_course:
+                        self.grid[d][s] = None
+                    else:
+                        self.grid[d][s] = self.selected_course
+                return
+
+            # Buttons
+            if self._confirm_btn.clicked(event):
+                self.confirmed = True
+            if self._clear_btn.clicked(event):
+                # clear all cells with the selected course
+                if self.selected_course:
+                    for day_row in self.grid:
+                        for s in range(len(day_row)):
+                            if day_row[s] == self.selected_course:
+                                day_row[s] = None
+            if self._skip_btn.clicked(event):
+                self.confirmed = True
+
+    # drawing
+    def draw(self, screen):
+        sw, sh = screen.get_size()
+        screen.fill((14, 16, 30))
+
+        n_days  = len(_DAYS)
+        n_slots = len(_SLOTS)
+        cw = self._CELL_W # slot column width
+        ch = self._CELL_H # day row height
+        hh = self._HEADER_H # slot-header row
+        dlw = self._DAY_LABEL_W # day-name column
+        pad = self._PAD
+        sw_side = self._SIDE_W
+
+        # Layout: [day-label col][slot columns …][pad][sidebar]
+        grid_total_w = dlw + n_slots * cw
+        total_w = grid_total_w + pad + sw_side
+        origin_x = (sw - total_w) // 2 # left edge of day-label column
+        origin_y = 100 # top edge of slot-header row
+
+        grid_x = origin_x + dlw # left edge of first slot column
+        grid_y = origin_y + hh # top edge of first day row
+        side_x = origin_x + grid_total_w + pad # left edge of sidebar
+
+        # Title
+        tf = pygame.font.Font("assets/fonts/Papernotes.otf", 36)
+        title = tf.render("Build Your Weekly Schedule", True, (200, 215, 255))
+        screen.blit(title, (sw // 2 - title.get_width() // 2, 12))
+        hint = self.smallfont.render(
+            "Select a course on the right, then click a cell to assign it.  Click again to remove.",
+            True, (130, 140, 170))
+        screen.blit(hint, (sw // 2 - hint.get_width() // 2, 52))
+
+        # "Placing" indicator (below hint, above grid)
+        if self.selected_course:
+            col = self._color_map.get(self.selected_course, (80, 100, 140))
+            ind_surf = self.smallfont.render(
+                f"Placing: {self.selected_course.name}", True, col)
+            screen.blit(ind_surf, (origin_x + dlw, origin_y - 20))
+
+        # Slot-header row (columns across the top)
+        self._cell_rects = [[None] * n_slots for _ in range(n_days)]
+        for s, (t_start, _t_end) in enumerate(_SLOTS):
+            hdr_rect = pygame.Rect(grid_x + s * cw, origin_y, cw, hh)
+            pygame.draw.rect(screen, self._COL_HEADER, hdr_rect)
+            pygame.draw.rect(screen, self._COL_BORDER, hdr_rect, 1)
+            if s == _LUNCH_IDX:
+                label = "Lunch"
+                lcol = self._COL_LUNCH_TEXT
+            else:
+                label = t_start
+                lcol = self._COL_TEXT
+            ls = self.smallfont.render(label, True, lcol)
+            screen.blit(ls, ls.get_rect(center=hdr_rect.center))
+
+        # Day rows
+        for d, day in enumerate(_DAYS):
+            # Day-name label cell (left column)
+            lbl_rect = pygame.Rect(origin_x, grid_y + d * ch, dlw - 2, ch)
+            pygame.draw.rect(screen, self._COL_HEADER, lbl_rect)
+            pygame.draw.rect(screen, self._COL_BORDER, lbl_rect, 1)
+            day_surf = self.smallfont.render(day, True, self._COL_TEXT)
+            screen.blit(day_surf, day_surf.get_rect(center=lbl_rect.center))
+
+            # Slot cells
+            for s in range(n_slots):
+                cell_rect = pygame.Rect(grid_x + s * cw, grid_y + d * ch, cw, ch)
+                self._cell_rects[d][s] = cell_rect
+
+                course = self.grid[d][s]
+                is_lunch = (s == _LUNCH_IDX)
+                is_hover = (self._hover_cell == (d, s)) and not is_lunch
+
+                if is_lunch:
+                    bg, border = self._COL_LUNCH, self._COL_LUNCH_BORDER
+                elif course:
+                    c = self._color_map.get(course, (80, 100, 140))
+                    bg = c
+                    border = tuple(min(255, v + 60) for v in c)
+                elif is_hover:
+                    bg, border = self._COL_HOVER, (100, 130, 200)
+                else:
+                    bg, border = self._COL_EMPTY, self._COL_BORDER
+
+                pygame.draw.rect(screen, bg, cell_rect)
+                pygame.draw.rect(screen, border, cell_rect, 1)
+
+                if is_lunch and d == n_days // 2:
+                    ls = self.smallfont.render("Break", True, self._COL_LUNCH_TEXT)
+                    screen.blit(ls, ls.get_rect(center=cell_rect.center))
+                elif course:
+                    words = course.name.split()
+                    lines, line = [], ""
+                    for w in words:
+                        test = (line + " " + w).strip()
+                        if self.smallfont.size(test)[0] < cw - 8:
+                            line = test
+                        else:
+                            lines.append(line)
+                            line = w
+                    if line:
+                        lines.append(line)
+                    total_th = len(lines) * (self.smallfont.get_height() + 2)
+                    ty = cell_rect.y + (ch - total_th) // 2
+                    for ln in lines:
+                        ls = self.smallfont.render(ln, True, (255, 255, 255))
+                        screen.blit(ls, (cell_rect.x + (cw - ls.get_width()) // 2, ty))
+                        ty += self.smallfont.get_height() + 2
+
+        # Grid outer border
+        outer = pygame.Rect(grid_x, origin_y, n_slots * cw, hh + n_days * ch)
+        pygame.draw.rect(screen, (80, 90, 130), outer, 2, border_radius=3)
+
+        # Right sidebar: course list
+        self._course_rects = []
+        panel_bg = pygame.Rect(side_x - 4, origin_y - 4,
+                               sw_side + 8, hh + n_days * ch + 8)
+        pygame.draw.rect(screen, self._COL_SEL_PANEL_BG, panel_bg, border_radius=8)
+        pygame.draw.rect(screen, (50, 60, 90), panel_bg, 1, border_radius=8)
+        hdr_lbl = self.smallfont.render("Courses", True, (160, 170, 210))
+        screen.blit(hdr_lbl,
+                    (side_x + sw_side // 2 - hdr_lbl.get_width() // 2, origin_y))
+        item_h = 36
+        for i, c in enumerate(self.courses):
+            r = pygame.Rect(side_x, origin_y + hh + 4 + i * (item_h + 6),
+                            sw_side, item_h)
+            self._course_rects.append(r)
+            is_sel = (c == self.selected_course)
+            col = self._color_map.get(c, (80, 100, 140))
+            bg  = tuple(min(255, v + 40) for v in col) if is_sel \
+                  else tuple(max(0, v - 20) for v in col)
+            pygame.draw.rect(screen, bg, r, border_radius=7)
+            brd = (255, 255, 255) if is_sel else col
+            pygame.draw.rect(screen, brd, r, 2 if is_sel else 1, border_radius=7)
+            ns = self.smallfont.render(c.name[:20], True, (255, 255, 255))
+            screen.blit(ns, (r.x + 8, r.y + (r.height - ns.get_height()) // 2))
+
+        # Buttons
+        btn_y = grid_y + n_days * ch + 18
+        self._confirm_btn.rect.centerx = sw // 2 + 80
+        self._confirm_btn.rect.y = btn_y
+        self._clear_btn.rect.centerx = sw // 2 - 80
+        self._clear_btn.rect.y = btn_y
+        self._skip_btn.rect.right = sw - pad
+        self._skip_btn.rect.y = btn_y
+        self._confirm_btn.draw(screen)
+        self._clear_btn.draw(screen)
+        self._skip_btn.draw(screen)
+
+    # internals 
+    def _cell_at(self, mx, my):
+        for d, day_col in enumerate(self._cell_rects):
+            for s, rect in enumerate(day_col):
+                if rect and rect.collidepoint(mx, my):
+                    return (d, s)
+        return None
+
+
 class InlineInput:
     """A field for a form row."""
     def __init__(self, x, y, w, h, font, placeholder="", is_float=False):
@@ -655,13 +950,13 @@ class SetupWizard:
         self.done = False
         self.step = 0 # 0: Student Type, 1: num_theory, 2: theory_form, 3: num_labs, 4: lab_form
         
-        self.result = {"type_mult": 1.0, "courses": [], "labs": []}
+        self.result = {"type_mult": 1.0, "courses": [], "labs": [], "schedule": {}}
 
         # Step 0 Slider
         labels = [(0.6, "Bad"), (1.0, "Average"), (1.4, "Good")]
         self.type_slider = Slider(300, 300, 400, 15, font, min_val=0.6, max_val=1.4, labels=labels)
         self.type_confirm_btn = Button(425, 420, 150, 45, "Confirm", btn_font)
-        
+
         # Quantity screens
         self.qty_input = NumberBox(font, smallfont)
         self.qty_btn = Button(0, 0, 140, 40, "Next", btn_font)
@@ -672,11 +967,14 @@ class SetupWizard:
         self.form_btn = Button(0, 0, 180, 45, "Confirm Details", btn_font)
         self._error = ""
 
+        # Step 5 – Schedule Builder
+        self.schedule_builder = ScheduleBuilder(font, smallfont, btn_font)
+
     def reset(self):
         self.active = True
         self.done = False
         self.step = 0
-        self.result = {"type_mult": 1.0, "courses": [], "labs": []}
+        self.result = {"type_mult": 1.0, "courses": [], "labs": [], "schedule": {}}
         self._error = ""
 
     def _build_form(self, count, type="Theory"):
@@ -750,8 +1048,7 @@ class SetupWizard:
             res = self.qty_input.handle_event(event)
             if res is not None:
                 if res == 0:
-                    self.active = False
-                    self.done = True
+                    self.step = 5  # skip lab form, go straight to schedule builder
                 else:
                     self._build_form(res, "Lab")
                     self.step = 4
@@ -775,6 +1072,13 @@ class SetupWizard:
 
             if self.form_btn.clicked(event):
                 self._validate_labs()
+
+        elif self.step == 5:  # Schedule Builder
+            self.schedule_builder.handle_event(event)
+            if self.schedule_builder.confirmed:
+                self.result["schedule"] = self.schedule_builder.get_schedule()
+                self.active = False
+                self.done = True
 
     def _validate_theory(self):
         res = []
@@ -807,8 +1111,16 @@ class SetupWizard:
                 self._error = "Invalid credit value!"
                 return
         self.result["labs"] = res
-        self.active = False
-        self.done = True
+        # Move to schedule builder (step 5)
+        self.step = 5
+        # Provide the builder with all courses + labs combined
+        all_courses = []  # will be populated by CourseManager after wizard;
+        # pass empty – main will call schedule_builder.set_courses() after setup
+        # We skip directly to the builder using the wizard result courses list.
+        # Build temporary Course-like dicts for display; real Course objects come from CourseManager.
+        # Actually we need real Course objects – but CourseManager.setup_from_wizard hasn't been called yet.
+        # So we store result and set_courses after main calls setup_from_wizard.
+        self.active = True  # stay active for step 5
 
     def draw(self, screen):
         if not self.active: return
@@ -875,3 +1187,6 @@ class SetupWizard:
             self.form_btn.rect.y = screen.get_height() - 100
             self.form_btn.draw(screen)
             if self._error: draw_centered(self._error, screen.get_height() - 140, self.smallfont, (255, 100, 100))
+
+        elif self.step == 5:  # Schedule Builder
+            self.schedule_builder.draw(screen)

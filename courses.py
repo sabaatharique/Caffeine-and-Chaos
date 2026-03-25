@@ -14,6 +14,9 @@ class Course:
         self.total_classes = total_classes
         self.attended_classes = 0
 
+        # Weekly timetable: list of (day_idx, slot_idx) tuples (0=Monday … 4=Friday)
+        self.weekly_slots: list[tuple[int, int]] = []
+
         # Theory
         self.quiz_marks = []
         self.mid_mark = None
@@ -267,3 +270,16 @@ class CourseManager:
         if not self.courses:
             return 0.0
         return sum(c.knowledge * c.credits for c in self.courses) / sum(c.credits for c in self.courses)
+
+    def apply_schedule(self, schedule: dict):
+        """Apply a schedule dict {(day_idx, slot_idx): Course} onto course objects."""
+        # Clear existing slots
+        for c in self.courses:
+            c.weekly_slots = []
+        # Assign new slots
+        for (day_idx, slot_idx), course in schedule.items():
+            if course in self.courses:
+                course.weekly_slots.append((day_idx, slot_idx))
+        # Sort slots for each course for consistent display
+        for c in self.courses:
+            c.weekly_slots.sort()

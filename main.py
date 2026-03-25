@@ -5,7 +5,7 @@ from student import Student
 from courses import CourseManager
 from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name
-from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard
+from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder
 from screens import main_menu, game_screen, day_end_screen
 
 # Window & clock
@@ -449,10 +449,19 @@ while running:
 
         # Setup Screen
         elif current_screen_state == SETUP_SCREEN:
-            wizard.handle_event(event)
-            if wizard.done:
+            # Initialise courses + schedule builder as soon as step 5 is reached
+            if wizard.step == 5 and not getattr(wizard, '_schedule_initialised', False):
                 student = Student(type_mult=wizard.result["type_mult"])
                 course_manager.setup_from_wizard(wizard.result)
+                wizard.schedule_builder.set_courses(course_manager.courses)
+                wizard._schedule_initialised = True
+
+            wizard.handle_event(event)
+
+            if wizard.done:
+                # Apply the schedule grid to each Course object
+                course_manager.apply_schedule(wizard.result.get("schedule", {}))
+                wizard._schedule_initialised = False
                 current_screen_state = GAME_SCREEN
 
         # Game Screen
