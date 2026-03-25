@@ -1,4 +1,5 @@
 import pygame
+from environment import day_name
 
 
 def main_menu(screen, background_image, start_button):
@@ -83,10 +84,10 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
     # Week subtitle
     week_label_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
     if day_in_week == 7:
-        wk_label = f"Week {week_count}  |  Day {day_in_week} of 7  -  Week Complete!"
+        wk_label = f"Week {week_count}, {day_name(day_in_week)} - Week Complete!"
         wk_color = (120, 255, 160)
     else:
-        wk_label = f"Week {week_count}  |  Day {day_in_week} of 7"
+        wk_label = f"Week {week_count}, {day_name(day_in_week)}"
         wk_color = (180, 230, 255)
     wk_surf = week_label_font.render(wk_label, True, wk_color)
     screen.blit(wk_surf, (WIDTH // 2 - wk_surf.get_width() // 2, HEIGHT // 2 - 46))

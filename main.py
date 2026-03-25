@@ -4,7 +4,7 @@ import sys
 from student import Student
 from courses import CourseManager
 from events import wifi_failure_event
-from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap
+from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name
 from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard
 from screens import main_menu, game_screen, day_end_screen
 
@@ -342,7 +342,7 @@ button_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
 message_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
 input_font   = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 clock_font   = pygame.font.Font("assets/fonts/Digital-7.ttf",  50)
-date_font    = pygame.font.Font("assets/fonts/Digital-7.ttf",  35)
+date_font    = pygame.font.Font("assets/fonts/Digital-7.ttf",  30)
 alert_title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 28)
 alert_body_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
 
@@ -355,48 +355,47 @@ wizard     = SetupWizard(message_font, input_font, button_font)
 pending_action: str | None = None
 
 # Status bars
-bar_w     = 130
-bar_h     = 16
+bar_w = 130
+bar_h = 16
 bar_space = (WIDTH - 6 * bar_w) / 7
 bars = [
-    StatusBar(bar_space,              60, bar_w, bar_h, "Knowledge",  message_font),
-    StatusBar(bar_space*2 + bar_w,    60, bar_w, bar_h, "Sleep",      message_font),
-    StatusBar(bar_space*3 + bar_w*2,  60, bar_w, bar_h, "Health",     message_font),
-    StatusBar(bar_space*4 + bar_w*3,  60, bar_w, bar_h, "Stress",     message_font),
-    StatusBar(bar_space*5 + bar_w*4,  60, bar_w, bar_h, "Motivation", message_font),
-    StatusBar(bar_space*6 + bar_w*5,  60, bar_w, bar_h, "Hunger",     message_font),
+    StatusBar(bar_space, 60, bar_w, bar_h, "Knowledge", message_font),
+    StatusBar(bar_space*2 + bar_w, 60, bar_w, bar_h, "Sleep", message_font),
+    StatusBar(bar_space*3 + bar_w*2, 60, bar_w, bar_h, "Health", message_font),
+    StatusBar(bar_space*4 + bar_w*3, 60, bar_w, bar_h, "Stress", message_font),
+    StatusBar(bar_space*5 + bar_w*4, 60, bar_w, bar_h, "Motivation", message_font),
+    StatusBar(bar_space*6 + bar_w*5, 60, bar_w, bar_h, "Hunger", message_font),
 ]
 
 # Action buttons
 start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "Start", button_font, 'black')
 
-btn_w     = 140
-btn_h     = 40
+btn_w = 140
+btn_h = 40
 btn_space = (WIDTH - 5 * btn_w) / 6
-study_btn       = Button(btn_space,              HEIGHT - 80, btn_w, btn_h, "Study",  button_font)
-sleep_btn       = Button(btn_space*2 + btn_w,    HEIGHT - 80, btn_w, btn_h, "Sleep",  button_font)
-relax_btn       = Button(btn_space*3 + btn_w*2,  HEIGHT - 80, btn_w, btn_h, "Relax",  button_font)
-drink_coffee_btn= Button(btn_space*4 + btn_w*3,  HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
-eat_btn         = Button(btn_space*5 + btn_w*4,  HEIGHT - 80, btn_w, btn_h, "Food",   button_font)
+study_btn = Button(btn_space, HEIGHT - 80, btn_w, btn_h, "Study", button_font)
+sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", button_font)
+relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
+drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
+eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
 game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
-_btn_y      = HEIGHT // 2 + 50
-_btn_w      = 120
+_btn_y = HEIGHT // 2 + 50
+_btn_w = 120
 _total_btns = 4
-_gap        = (WIDTH - _total_btns * _btn_w) // (_total_btns + 1)
-continue_btn     = Button(_gap,                        _btn_y, _btn_w, 40, "Continue",    button_font)
-repeat_btn       = Button(_gap * 2 + _btn_w,           _btn_y, _btn_w, 40, "Repeat Day",  button_font)
-repeat_week_btn  = Button(_gap * 3 + _btn_w * 2,       _btn_y, _btn_w, 40, "Repeat Week", button_font)
-quit_btn         = Button(_gap * 4 + _btn_w * 3,       _btn_y, _btn_w, 40, "Quit",        button_font)
+_gap = (WIDTH - _total_btns * _btn_w) // (_total_btns + 1)
+continue_btn = Button(_gap, _btn_y, _btn_w, 40, "Continue", button_font)
+repeat_btn = Button(_gap * 2 + _btn_w, _btn_y, _btn_w, 40, "Repeat Day", button_font)
+repeat_week_btn = Button(_gap * 3 + _btn_w * 2, _btn_y, _btn_w, 40, "Repeat Week", button_font)
+quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font)
 
 week_repeat_box = NumberBox(message_font, input_font)
 
-messages: list[str]              = []
+messages: list[str] = []
 replay_runner: ReplayRunner | None = None
 
 
-# ── Helper: handle day-end trigger ───────────────────────────────────
 def _check_day_end(new_msgs: list[str]) -> list[str]:
     """Call end_of_day if the day clock has run out; return extra messages."""
     global day_over, burnout_active, current_screen_state
@@ -421,20 +420,20 @@ while running:
 
     # Derive week tracking from day_count (always consistent, works with any runner)
     day_in_week = ((day_count - 1) % 7) + 1   # 1-7
-    week_count  = ((day_count - 1) // 7) + 1  # 1, 2, ...
+    week_count = ((day_count - 1) // 7) + 1  # 1, 2, ...
 
     # -- Button enable state --
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
             btn.enabled = False
     else:
-        study_btn.enabled        = student.action_status['study']  and remaining_hours > 0
-        sleep_btn.enabled        = student.action_status['sleep']  and remaining_hours > 0
-        relax_btn.enabled        = student.action_status['relax']  and remaining_hours > 0
-        eat_btn.enabled          = student.action_status['eat']    and remaining_hours >= 0.5
+        study_btn.enabled = student.action_status['study'] and remaining_hours > 0
+        sleep_btn.enabled = student.action_status['sleep'] and remaining_hours > 0
+        relax_btn.enabled = student.action_status['relax'] and remaining_hours > 0
+        eat_btn.enabled = student.action_status['eat'] and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
 
-    repeat_btn.enabled      = not burnout_active
+    repeat_btn.enabled = not burnout_active
     repeat_week_btn.enabled = not burnout_active and day_in_week == 7
 
     # Event handling
@@ -617,8 +616,8 @@ while running:
                     daily_outages = wifi_failure_event()
                     new_diy = ((day_count - 1) % 7) + 1
                     new_wk  = ((day_count - 1) // 7) + 1
-                    messages = [f"Week {new_wk} - Day {new_diy} begins!"]
-                    print(f"\n--- Week {new_wk} - Day {new_diy} (Day {day_count}) ---")
+                    messages = [f"Week {new_wk} - {day_name(new_diy)} begins!"]
+                    print(f"\n--- Week {new_wk} - {day_name(new_diy)} (Day {day_count}) ---")
                     print(f"Time of day: {format_time(time_of_day)}")
                     current_screen_state = GAME_SCREEN
 
