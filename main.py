@@ -6,7 +6,8 @@ from courses import CourseManager
 from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name
 from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder
-from screens import main_menu, game_screen, day_end_screen
+from screens import main_menu, game_screen, day_end_screen, save_prompt_screen
+from savegame import save_game, load_game, delete_save, save_exists
 
 # Window & clock
 pygame.init()
@@ -24,17 +25,17 @@ day_over      = False
 burnout_active = False   # True while student is recovering from burnout
 
 # Week tracking
-week_count    = 1        # current week number (starts at 1)
-day_in_week   = 1        # day within the current week (1-7)
-week_actions: list[list] = []  # accumulated per-day action lists for current week
-_current_day_actions_snapshot: list = []  # snapshot of day_actions at week-day start
+week_count = 1 # current week number (starts at 1)
+day_in_week = 1 # day within the current week (1-7)
+week_actions: list[list] = [] # accumulated per-day action lists for current week
+_current_day_actions_snapshot: list = [] # snapshot of day_actions at week-day start
 
 print(f"Time of day: {format_time(time_of_day)}")
 
-student        = Student()
+student = Student()
 course_manager = CourseManager()
 
-day_actions  = []
+day_actions = []
 daily_outages = wifi_failure_event()
 week_replay_runner: "WeekReplayRunner | None" = None
 
@@ -323,6 +324,7 @@ MAIN_MENU = "main_menu"
 SETUP_SCREEN = "setup_screen"
 GAME_SCREEN = "game_screen"
 DAY_END_SCREEN = "day_end_screen"
+SAVE_PROMPT = "save_prompt"
 current_screen_state = MAIN_MENU
 
 # Assets
@@ -368,7 +370,10 @@ bars = [
 ]
 
 # Action buttons
-start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "Start", button_font, 'black')
+start_btn = Button(WIDTH - 160, HEIGHT - 80, 120, 40, "New Game", button_font, 'black')
+
+# Main-menu "Continue" button (shown only when a save file exists)
+continue_menu_btn = Button(WIDTH - 160, HEIGHT - 130, 120, 40, "Continue", button_font, 'black')
 
 btn_w = 140
 btn_h = 40
@@ -390,10 +395,20 @@ repeat_btn = Button(_gap * 2 + _btn_w, _btn_y, _btn_w, 40, "Repeat Day", button_
 repeat_week_btn = Button(_gap * 3 + _btn_w * 2, _btn_y, _btn_w, 40, "Repeat Week", button_font)
 quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font)
 
+# Save-prompt buttons (shown in the SAVE_PROMPT overlay)
+_sp_y = HEIGHT // 2 + 20
+_sp_gap = 20
+_sp_w = 120
+save_yes_btn = Button(WIDTH // 2 - _sp_w - _sp_gap // 2, _sp_y, _sp_w, 40, "Save & Quit", button_font)
+save_no_btn  = Button(WIDTH // 2 + _sp_gap // 2,           _sp_y, _sp_w, 40, "Quit",       button_font)
+
 week_repeat_box = NumberBox(message_font, input_font)
 
 messages: list[str] = []
 replay_runner: ReplayRunner | None = None
+
+# Track the last non-prompt screen state so SAVE_PROMPT can render a backdrop
+_last_game_screen: str = MAIN_MENU
 
 
 def _check_day_end(new_msgs: list[str]) -> list[str]:
@@ -439,13 +454,56 @@ while running:
     # Event handling
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
+            # Route X-button through save prompt (unless already on main menu with no progress)
+            if current_screen_state == MAIN_MENU:
+                running = False
+            else:
+                current_screen_state = SAVE_PROMPT
+
+        # Save Prompt
+        if current_screen_state == SAVE_PROMPT:
+            if save_yes_btn.clicked(event):
+                save_game(
+                    student, course_manager,
+                    time_of_day, day_count, week_count, day_in_week,
+                    burnout_active, day_over,
+                    day_actions, week_actions
+                )
+                running = False
+            if save_no_btn.clicked(event):
+                running = False
 
         # Main Menu
-        if current_screen_state == MAIN_MENU:
+        elif current_screen_state == MAIN_MENU:
             if start_btn.clicked(event):
+                # New game: wipe any existing save
+                delete_save()
+                student = Student()
+                course_manager = CourseManager()
                 wizard.reset()
                 current_screen_state = SETUP_SCREEN
+
+            if save_exists() and continue_menu_btn.clicked(event):
+                # Load saved game
+                loaded = load_game(student, course_manager)
+                if loaded:
+                    time_of_day = loaded["time_of_day"]
+                    day_count = loaded["day_count"]
+                    week_count = loaded["week_count"]
+                    day_in_week = loaded["day_in_week"]
+                    burnout_active = loaded["burnout_active"]
+                    day_over = loaded["day_over"]
+                    day_actions[:] = loaded["day_actions"]
+                    week_actions[:] = loaded["week_actions"]
+                    daily_outages = wifi_failure_event()
+                    messages = [f"Welcome back! Week {week_count} - {day_name(day_in_week)} (Day {day_count})"]
+                    # Route to the correct screen based on saved state
+                    if day_over:
+                        _last_game_screen = DAY_END_SCREEN
+                        current_screen_state = DAY_END_SCREEN
+                    else:
+                        _last_game_screen = GAME_SCREEN
+                        current_screen_state = GAME_SCREEN
 
         # Setup Screen
         elif current_screen_state == SETUP_SCREEN:
@@ -645,7 +703,7 @@ while running:
                         messages = ["No actions recorded this week."]
 
                 if quit_btn.clicked(event):
-                    running = False
+                    current_screen_state = SAVE_PROMPT
 
     # ── Active replay tick (day runner) ─────────────────────────────────
     if (current_screen_state == DAY_END_SCREEN
@@ -691,11 +749,44 @@ while running:
         if week_replay_runner.done and week_replay_runner.burnout_occurred:
             burnout_active = True
 
+    # Track the last real screen (not the prompt) for backdrop rendering
+    if current_screen_state != SAVE_PROMPT:
+        _last_game_screen = current_screen_state
+
     # Draw
     screen.fill((30, 30, 30))
 
-    if current_screen_state == MAIN_MENU:
-        main_menu(screen, main_bg, start_btn)
+    if current_screen_state == SAVE_PROMPT:
+        # Draw the backdrop of whatever screen the player was on
+        if _last_game_screen == MAIN_MENU:
+            main_menu(screen, main_bg, start_btn,
+                      continue_button=continue_menu_btn if save_exists() else None)
+        elif _last_game_screen == GAME_SCREEN:
+            avg_k = course_manager.get_average_knowledge()
+            game_screen(screen, current_game_bg, student, bars, game_buttons,
+                        messages, message_font, bar_space)
+            bars[0].draw(screen, avg_k)
+            draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
+                       week_count=week_count, day_in_week=day_in_week)
+        elif _last_game_screen == DAY_END_SCREEN:
+            avg_k = course_manager.get_average_knowledge()
+            day_end_screen(
+                screen, current_game_bg, student, bars, game_buttons,
+                messages, message_font, bar_space,
+                draw_clock, clock_font, date_font,
+                time_of_day, day_count,
+                avg_k, burnout_active,
+                continue_btn, repeat_btn, quit_btn,
+                repeat_box, alert_box,
+                week_count=week_count, day_in_week=day_in_week,
+                repeat_week_btn=repeat_week_btn,
+                week_repeat_box=week_repeat_box,
+            )
+        save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
+
+    elif current_screen_state == MAIN_MENU:
+        main_menu(screen, main_bg, start_btn,
+                  continue_button=continue_menu_btn if save_exists() else None)
 
     elif current_screen_state == SETUP_SCREEN:
         wizard.draw(screen)

@@ -2,9 +2,44 @@ import pygame
 from environment import day_name
 
 
-def main_menu(screen, background_image, start_button):
+def main_menu(screen, background_image, start_button, continue_button=None):
     screen.blit(background_image, (0, 0))
     start_button.draw(screen)
+    if continue_button is not None:
+        continue_button.draw(screen)
+
+
+def save_prompt_screen(screen, yes_btn, no_btn, font):
+    """Draw a semi-transparent 'Save before quitting?' dialog."""
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    # Dim the whole screen
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 200))
+    screen.blit(overlay, (0, 0))
+
+    # Card background
+    card_w, card_h = 420, 180
+    card_x = (WIDTH - card_w) // 2
+    card_y = (HEIGHT - card_h) // 2
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((30, 30, 50, 230))
+    screen.blit(card_surf, (card_x, card_y))
+
+    # Border
+    pygame.draw.rect(screen, (120, 100, 200), (card_x, card_y, card_w, card_h), 2, border_radius=8)
+
+    # Title
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 28)
+    title_surf = title_font.render("Save Progress?", True, (255, 255, 255))
+    screen.blit(title_surf, (card_x + card_w // 2 - title_surf.get_width() // 2, card_y + 22))
+
+    # Sub-text
+    sub_surf = font.render("Do you want to save before quitting?", True, (200, 200, 200))
+    screen.blit(sub_surf, (card_x + card_w // 2 - sub_surf.get_width() // 2, card_y + 68))
+
+    yes_btn.draw(screen)
+    no_btn.draw(screen)
 
 
 def game_screen(screen, background_image, student, bars, buttons,
