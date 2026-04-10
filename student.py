@@ -130,13 +130,15 @@ class Student:
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
             return messages
-        
-        # Attendance affects specific course knowledge
-        course.add_knowledge(self.class_knowledge_rate)
-        self.stress += self.class_stress_rate
-        self.sleep -= self.class_sleep_loss
-        self.attendance += 1
 
+        course.attended_classes += 1
+        self.attendance += 1
+        course.add_knowledge(self.class_knowledge_rate)
+        self.sleep -= self.class_sleep_loss
+        self.stress += self.class_stress_rate
+        self.motivation += 3
+
+        messages.append(f"Attended {course.name}. Knowledge +{self.class_knowledge_rate}.")
         messages.extend(self.clamp())
         return messages
 

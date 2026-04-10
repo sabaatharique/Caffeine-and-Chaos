@@ -8,6 +8,44 @@ DAY_END:   float = 32.0   # 08:00 next morning (24 + 8)
 DAYS_IN_WEEK = 7
 DAYS_OF_WEEK = [ "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" ]
 
+# Index 4 is the lunch slot (no classes)
+# Each class period is 75 minutes 
+SLOT_TIMES: list[tuple[float, float]] = [
+    (8.0,   9.25),   # 8:00 – 9:15
+    (9.25,  10.5),   # 9:15 – 10:30
+    (10.5,  11.75),  # 10:30 – 11:45
+    (11.75, 13.0),   # 11:45 – 1:00
+    (13.0,  14.5),   # 1:00 – 2:30  ← lunch break (slot 4, no classes)
+    (14.5,  15.75),  # 2:30 – 3:45
+    (15.75, 17.0),   # 3:45 – 5:00
+]
+LUNCH_SLOT_IDX = 4   # index of the lunch slot (never has a class)
+
+
+def get_todays_classes(courses: list, day_in_week: int,
+                       week_count: int = 1) -> list[tuple[float, float, object]]:
+    """Return a sorted list of (start_hour, end_hour, course) for all classes
+    scheduled on *day_in_week* (1=Monday … 5=Friday).
+    Saturday (6) and Sunday (7) always return an empty list.
+    Biweekly courses appear only on odd-numbered weeks (1, 3, 5 …).
+    """
+    if day_in_week > 5:
+        return []  # no classes on weekends
+
+    day_idx = day_in_week - 1  # 0-indexed (0=Monday … 4=Friday)
+    result = []
+    for course in courses:
+        # Biweekly labs only run on odd weeks; skip on even weeks
+        if getattr(course, "schedule", "weekly") == "biweekly" and week_count % 2 == 0:
+            continue
+        for (d, s) in course.weekly_slots:
+            if d == day_idx and s != LUNCH_SLOT_IDX:
+                start_h, end_h = SLOT_TIMES[s]
+                result.append((start_h, end_h, course))
+
+    result.sort(key=lambda x: x[0])
+    return result
+
 
 def day_name(day_in_week: int) -> str:
     """Return the weekday name for a 1-based day_in_week (1=Monday … 7=Sunday)."""

@@ -109,7 +109,9 @@ def _actions_from_serialisable(raw: list, course_manager) -> list:
 def save_game(student, course_manager,
               time_of_day, day_count, week_count, day_in_week,
               burnout_active, day_over,
-              day_actions: list, week_actions: list) -> bool:
+              day_actions: list, week_actions: list,
+              classes_resolved: set = None,
+              attend_all_today: bool = False) -> bool:
     """
     Write all game state to SAVE_FILE.
     Returns True on success, False on error.
@@ -125,6 +127,8 @@ def save_game(student, course_manager,
         "day_over": day_over,
         "day_actions": _actions_to_serialisable(day_actions),
         "week_actions": [_actions_to_serialisable(d) for d in week_actions],
+        "classes_resolved_today": list(classes_resolved) if classes_resolved else [],
+        "attend_all_today": attend_all_today,
     }
     try:
         with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -169,6 +173,8 @@ def load_game(student, course_manager) -> dict | None:
             "day_over": data.get("day_over", False),
             "day_actions": day_actions,
             "week_actions": week_actions,
+            "classes_resolved_today": set(data.get("classes_resolved_today", [])),
+            "attend_all_today": data.get("attend_all_today", False),
         }
     except Exception as e:
         print(f"[SaveGame] Failed to load: {e}")

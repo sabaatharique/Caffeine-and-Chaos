@@ -502,6 +502,181 @@ class AlertBox:
         
 
 
+class ClassInterruptBox:
+    """Modal interrupt shown when a scheduled class period begins.
+    """
+
+    _BG = (20, 28, 50)
+    _BORDER = (100, 160, 255)
+    _TITLE_C = (140, 200, 255)
+    _BODY_C = (220, 225, 245)
+    _ATTEND_C = (50, 200, 120)
+    _SKIP_C = (200, 80,  80)
+    _CB_ON = (80, 200, 120)
+    _CB_OFF = (80, 80, 110)
+
+    def __init__(self, font, smallfont):
+        self.font = font
+        self.smallfont = smallfont
+        self.active = False
+        self.attend_all = False  
+
+        self._course = None
+        self._start_hour = 0.0
+        self._end_hour = 0.0
+        self._attend_pct = 0.0
+        self._result = None  # "attend" | "skip" | None
+
+        # Rects computed in draw()
+        self._attend_btn = None
+        self._skip_btn = None
+        self._cb_rect = None  
+
+    def open(self, course, start_hour: float, end_hour: float, attendance_pct: float):
+        self.active = True
+        self._course = course
+        self._start_hour = start_hour
+        self._end_hour = end_hour
+        self._attend_pct = attendance_pct
+        self._result = None
+
+    def handle_event(self, event) -> str | None:
+        """Return "attend", "skip", or None."""
+        if not self.active:
+            return None
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN or event.key == pygame.K_a:
+                return self._confirm("attend")
+            if event.key == pygame.K_s or event.key == pygame.K_ESCAPE:
+                return self._confirm("skip")
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+
+            # Checkbox toggle
+            if self._cb_rect and self._cb_rect.collidepoint(mx, my):
+                self.attend_all = not self.attend_all
+                return None
+
+            # Attend button
+            if self._attend_btn and self._attend_btn.collidepoint(mx, my):
+                return self._confirm("attend")
+
+            # Skip button
+            if self._skip_btn and self._skip_btn.collidepoint(mx, my):
+                return self._confirm("skip")
+
+        return None
+
+    def _confirm(self, result: str) -> str:
+        self._result = result
+        self.active  = False
+        return result
+
+    @staticmethod
+    def _fmt(hour: float) -> str:
+        """Convert fractional hour to 12-h string (reuses env logic inline)."""
+        total_minutes = round(hour * 60)
+        h = (total_minutes // 60) % 24
+        m = total_minutes % 60
+        if h == 0:
+            return f"12:{m:02d} AM"
+        elif h < 12:
+            return f"{h}:{m:02d} AM"
+        elif h == 12:
+            return f"12:{m:02d} PM"
+        else:
+            return f"{h - 12}:{m:02d} PM"
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        sw, sh = screen.get_size()
+
+        # Dim background
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+
+        box_w, box_h = 500, 290
+        box_x = (sw - box_w) // 2
+        box_y = (sh - box_h) // 2
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+
+        pygame.draw.rect(screen, self._BG,    box_rect, border_radius=14)
+        pygame.draw.rect(screen, self._BORDER, box_rect, 2, border_radius=14)
+
+        # Bell icon stripe 
+        stripe = pygame.Rect(box_x, box_y, box_w, 40)
+        pygame.draw.rect(screen, (30, 50, 100), stripe,
+                         border_radius=14)
+        # Only round top corners (overdraw bottom corners)
+        pygame.draw.rect(screen, (30, 50, 100),
+                         pygame.Rect(box_x, box_y + 20, box_w, 20))
+
+        bell_surf = self.font.render("Class Starting Now!", True, self._TITLE_C)
+        screen.blit(bell_surf, bell_surf.get_rect(centerx=box_rect.centerx, y=box_y + 8))
+
+        y = box_y + 58
+        course_name = self._course.name if self._course else "Unknown"
+        cname_surf = self.font.render(course_name, True, (255, 255, 255))
+        screen.blit(cname_surf, cname_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += cname_surf.get_height() + 6
+
+        time_str = f"{self._fmt(self._start_hour)} - {self._fmt(self._end_hour)}"
+        time_surf = self.smallfont.render(time_str, True, self._BODY_C)
+        screen.blit(time_surf, time_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += time_surf.get_height() + 4
+
+        att_str = f"Attendance so far: {self._attend_pct:.0f}%"
+        att_color = (231, 76, 60) if self._attend_pct < 75 else (46, 204, 113)
+        att_surf = self.smallfont.render(att_str, True, att_color)
+        screen.blit(att_surf, att_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += att_surf.get_height() + 18
+
+        btn_w, btn_h = 160, 44
+        gap = 20
+        total_btn_w = btn_w * 2 + gap
+        left_x = box_rect.centerx - total_btn_w // 2
+
+        self._attend_btn = pygame.Rect(left_x, y, btn_w, btn_h)
+        mouse = pygame.mouse.get_pos()
+        attend_hov = self._attend_btn.collidepoint(mouse)
+        attend_col = (40, 180, 100) if attend_hov else (30, 150, 80)
+        pygame.draw.rect(screen, attend_col, self._attend_btn, border_radius=8)
+        pygame.draw.rect(screen, self._ATTEND_C, self._attend_btn, 2, border_radius=8)
+        a_surf = self.font.render("Attend  [A]", True, (255, 255, 255))
+        screen.blit(a_surf, a_surf.get_rect(center=self._attend_btn.center))
+
+        self._skip_btn = pygame.Rect(left_x + btn_w + gap, y, btn_w, btn_h)
+        skip_hov = self._skip_btn.collidepoint(mouse)
+        skip_col = (180, 50, 50) if skip_hov else (140, 30, 30)
+        pygame.draw.rect(screen, skip_col, self._skip_btn, border_radius=8)
+        pygame.draw.rect(screen, self._SKIP_C, self._skip_btn, 2, border_radius=8)
+        s_surf = self.font.render("Skip  [S]", True, (255, 255, 255))
+        screen.blit(s_surf, s_surf.get_rect(center=self._skip_btn.center))
+
+        y += btn_h + 16
+
+        cb_size = 22
+        self._cb_rect = pygame.Rect(box_rect.centerx - 130, y + 2, cb_size, cb_size)
+        cb_col = self._CB_ON if self.attend_all else self._CB_OFF
+        pygame.draw.rect(screen, cb_col, self._cb_rect, border_radius=4)
+        pygame.draw.rect(screen, (200, 210, 255), self._cb_rect, 2, border_radius=4)
+        if self.attend_all:
+            # Draw a checkmark tick
+            cx, cy = self._cb_rect.centerx, self._cb_rect.centery
+            pygame.draw.line(screen, (255, 255, 255),
+                             (cx - 6, cy), (cx - 1, cy + 5), 3)
+            pygame.draw.line(screen, (255, 255, 255),
+                             (cx - 1, cy + 5), (cx + 7, cy - 5), 3)
+
+        cb_label = self.smallfont.render("Attend all classes today", True, self._BODY_C)
+        screen.blit(cb_label, (self._cb_rect.right + 10, y + (cb_size - cb_label.get_height()) // 2))
+
+
 # Schedule Builder 
 # University timetable constants
 _DAYS   = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -995,6 +1170,7 @@ class SetupWizard:
                 # Explicit selector for schedule
                 sched = ScheduleSelector(380, start_y + i*row_h, 180, 35, self.smallfont)
                 cred = InlineInput(570, start_y + i*row_h, 80, 35, self.smallfont, "Credits", is_float=True)
+                cred.text = "1.0"   # default for weekly; auto-updates on schedule toggle
                 self.rows.append({"name": name, "sched": sched, "credits": cred})
         
         self._sync_focus()
@@ -1061,9 +1237,15 @@ class SetupWizard:
                     self._sync_focus()
                     return
 
-            # Handle ScheduleSelector events separately
+            # Handle ScheduleSelector events separately; auto-fill default credits on toggle
+            _DEFAULT_CREDITS = {"weekly": "1.0", "biweekly": "0.75"}
+            _KNOWN_DEFAULTS = set(_DEFAULT_CREDITS.values()) | {"", "1", "0"}
             for r in self.rows:
+                _old_sched = r["sched"].value
                 r["sched"].handle_event(event)
+                _new_sched = r["sched"].value
+                if _old_sched != _new_sched and r["credits"].text in _KNOWN_DEFAULTS:
+                    r["credits"].text = _DEFAULT_CREDITS[_new_sched]
 
             # Handle text input fields
             for f in self.all_fields:

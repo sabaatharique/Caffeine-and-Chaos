@@ -4,8 +4,8 @@ import sys
 from student import Student
 from courses import CourseManager
 from events import wifi_failure_event
-from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name
-from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder
+from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
+from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder, ClassInterruptBox
 from screens import main_menu, game_screen, day_end_screen, save_prompt_screen
 from savegame import save_game, load_game, delete_save, save_exists
 
@@ -38,6 +38,12 @@ course_manager = CourseManager()
 day_actions = []
 daily_outages = wifi_failure_event()
 week_replay_runner: "WeekReplayRunner | None" = None
+
+# Class interrupt state (reset each day)
+todays_classes: list = []   # [(start_h, end_h, course), ...]
+_classes_resolved: set = set() # start_hours already handled today
+_pending_class: tuple | None = None  # class currently shown in interrupt box
+_classes_populated_for_day: int = 0  # day_count when todays_classes was last built
 
 
 def record_action(action: str, hours: float, data=None):
@@ -105,7 +111,8 @@ class ReplayRunner:
         action_end   = self.time_cursor + hours
 
         # Fire an outage interrupt before this action if one overlaps
-        if self._outage_idx < len(self._day_outages):
+        # Skip WiFi alerts during attend_class — player is not at home
+        if self._outage_idx < len(self._day_outages) and action != 'attend_class':
             outage = self._day_outages[self._outage_idx]
             if outage["start"] < action_end:
                 # Fire the outage interrupt BEFORE running the action
@@ -151,6 +158,16 @@ class ReplayRunner:
         elif action == 'coffee' and self.student.action_status['coffee']:
             new_msgs.extend(self.student.apply_hunger_decay(0.25))
             new_msgs.extend(self.student.drink_coffee())
+        elif action == 'attend_class':
+            _diw = ((self.current_day - 1) % 7) + 1
+            _week = ((self.current_day - 1) // 7) + 1
+            if _diw <= 5:  # weekdays only
+                _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
+                _actual = next((c for (s, e, c) in _todays if abs(s - action_start) < 0.1), None)
+            else:
+                _actual = None  # no classes on weekends
+            if _actual:
+                new_msgs.extend(self.student.attend_class(_actual))
 
         self.time_cursor    = action_end
         self.action_idx    += 1
@@ -191,6 +208,7 @@ class WeekReplayRunner:
         self.msgs = []
         self.done = False
         self.burnout_occurred = False
+        self.current_action = None
 
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
@@ -262,8 +280,8 @@ class WeekReplayRunner:
         action_start = self.time_cursor
         action_end   = self.time_cursor + hours
 
-        # WiFi outage interrupt
-        if self._outage_idx < len(self._day_outages):
+        # WiFi outage interrupt — suppressed during attend_class (player is at university)
+        if self._outage_idx < len(self._day_outages) and action != 'attend_class':
             outage = self._day_outages[self._outage_idx]
             if outage["start"] < action_end:
                 self._outage_idx += 1
@@ -306,12 +324,24 @@ class WeekReplayRunner:
         elif action == 'coffee' and self.student.action_status['coffee']:
             new_msgs.extend(self.student.apply_hunger_decay(0.25))
             new_msgs.extend(self.student.drink_coffee())
+        elif action == 'attend_class':
+            # Use the class actually scheduled on this replay day at this time slot.
+            _diw = ((self.current_day - 1) % 7) + 1
+            _week = ((self.current_day - 1) // 7) + 1
+            if _diw <= 5:
+                _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
+                _actual = next((c for (s, e, c) in _todays if abs(s - action_start) < 0.1), None)
+            else:
+                _actual = None
+            if _actual:
+                new_msgs.extend(self.student.attend_class(_actual))
 
         self.time_cursor  = action_end
         self.action_idx  += 1
+        self.current_action = action
         self.msgs.extend(new_msgs)
 
-        pygame.time.wait(200)   # slight pause so replay is watchable
+        pygame.time.wait(50)   # faster for week replay
         return new_msgs, None
 
     def last_msgs(self, n=5):
@@ -330,12 +360,14 @@ current_screen_state = MAIN_MENU
 # Assets
 main_bg = pygame.image.load("assets/images/main.jpg")
 bg_map  = {
-    'study':   pygame.image.load("assets/images/study.jpg"),
-    'sleep':   pygame.image.load("assets/images/sleep.jpg"),
-    'relax':   pygame.image.load("assets/images/break.jpg"),
-    'coffee':  pygame.image.load("assets/images/coffee.jpg"),
-    'eat':     pygame.image.load("assets/images/eat.jpg"),
-    'default': pygame.image.load("assets/images/study.jpg"),
+    'study':        pygame.image.load("assets/images/study.jpg"),
+    'sleep':        pygame.image.load("assets/images/sleep.jpg"),
+    'relax':        pygame.image.load("assets/images/break.jpg"),
+    'coffee':       pygame.image.load("assets/images/coffee.jpg"),
+    'eat':          pygame.image.load("assets/images/eat.jpg"),
+    'attend_class': pygame.image.load("assets/images/class.jpg"),
+    'burnout':      pygame.image.load("assets/images/burnout.jpg"),
+    'default':      pygame.image.load("assets/images/study.jpg"),
 }
 current_game_bg = bg_map['default']
 
@@ -352,6 +384,7 @@ alert_body_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
 input_box  = InputBox(message_font, input_font)
 repeat_box = NumberBox(message_font, input_font)
 alert_box  = AlertBox(alert_title_font, alert_body_font)
+class_interrupt_box = ClassInterruptBox(button_font, input_font)
 wizard     = SetupWizard(message_font, input_font, button_font)
 
 pending_action: str | None = None
@@ -413,7 +446,7 @@ _last_game_screen: str = MAIN_MENU
 
 def _check_day_end(new_msgs: list[str]) -> list[str]:
     """Call end_of_day if the day clock has run out; return extra messages."""
-    global day_over, burnout_active, current_screen_state
+    global day_over, burnout_active, current_screen_state, current_game_bg
     if round(time_of_day * 60) >= round(DAY_END * 60):
         eod_msgs = student.end_of_day()
         new_msgs.extend(eod_msgs)
@@ -421,6 +454,7 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
         print(f"Day {day_count} ended.")
         if any("Burnout!" in m for m in eod_msgs):
             burnout_active = True
+            current_game_bg = bg_map['burnout']
         if any("recovered from burnout" in m for m in eod_msgs):
             burnout_active = False
         day_over = True
@@ -437,7 +471,7 @@ while running:
     day_in_week = ((day_count - 1) % 7) + 1   # 1-7
     week_count = ((day_count - 1) // 7) + 1  # 1, 2, ...
 
-    # -- Button enable state --
+    # Button enable state
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
             btn.enabled = False
@@ -448,7 +482,12 @@ while running:
         eat_btn.enabled = student.action_status['eat'] and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
 
-    repeat_btn.enabled = not burnout_active
+    # Week-1 flow constraints
+    if week_count == 1 and day_in_week == 7:  # Sunday of week 1: can't repeat day
+        repeat_btn.enabled = False
+    else:
+        repeat_btn.enabled = not burnout_active
+    # Repeat Week: enabled once the first full week (day 7) is complete
     repeat_week_btn.enabled = not burnout_active and day_in_week == 7
 
     # Event handling
@@ -467,7 +506,9 @@ while running:
                     student, course_manager,
                     time_of_day, day_count, week_count, day_in_week,
                     burnout_active, day_over,
-                    day_actions, week_actions
+                    day_actions, week_actions,
+                    classes_resolved=_classes_resolved,
+                    attend_all_today=class_interrupt_box.attend_all,
                 )
                 running = False
             if save_no_btn.clicked(event):
@@ -495,6 +536,10 @@ while running:
                     day_over = loaded["day_over"]
                     day_actions[:] = loaded["day_actions"]
                     week_actions[:] = loaded["week_actions"]
+                    # Restore class interrupt state
+                    _classes_resolved.clear()
+                    _classes_resolved.update(loaded.get("classes_resolved_today", set()))
+                    class_interrupt_box.attend_all = loaded.get("attend_all_today", False)
                     daily_outages = wifi_failure_event()
                     messages = [f"Welcome back! Week {week_count} - {day_name(day_in_week)} (Day {day_count})"]
                     # Route to the correct screen based on saved state
@@ -524,6 +569,30 @@ while running:
 
         # Game Screen
         elif current_screen_state == GAME_SCREEN:
+            # Class interrupt: handle Attend / Skip 
+            if class_interrupt_box.active:
+                class_result = class_interrupt_box.handle_event(event)
+                if class_result is not None and _pending_class is not None:
+                    p_start, p_end, p_course = _pending_class
+                    _classes_resolved.add(p_start)
+                    _pending_class = None
+                    if class_result == "attend":
+                        new_msgs = student.attend_class(p_course)
+                        record_action('attend_class', 1.25, p_course)
+                        # Jump clock to the actual end of the class period
+                        time_of_day = max(time_of_day, p_end)
+                        current_game_bg = bg_map['attend_class']
+                        print(f"Time of day: {format_time(time_of_day)}")
+                        if new_msgs:
+                            messages.extend(new_msgs)
+                            messages = messages[-5:]
+                        _check_day_end(messages)
+                    elif class_result == "skip":
+                        # Small motivation penalty for skipping
+                        student.motivation -= 2
+                        student.clamp()
+                        messages.append(f"Skipped {p_course.name}.")
+                        messages = messages[-5:]
             new_messages = []
 
             if alert_box.active:
@@ -576,7 +645,7 @@ while running:
                     print(f"Time of day: {format_time(time_of_day)}")
                     _check_day_end(new_messages)
 
-            else:
+            elif not class_interrupt_box.active:
                 # Open the input prompt for actions that need hours
                 remaining_hours = DAY_END - time_of_day
 
@@ -686,11 +755,26 @@ while running:
                     messages = [f"Week {new_wk} - {day_name(new_diy)} begins!"]
                     print(f"\n--- Week {new_wk} - {day_name(new_diy)} (Day {day_count}) ---")
                     print(f"Time of day: {format_time(time_of_day)}")
+                    # Reset class interrupt state for the new day
+                    todays_classes.clear()
+                    _classes_resolved.clear()
+                    class_interrupt_box.attend_all = False
                     current_screen_state = GAME_SCREEN
 
                 if repeat_btn.clicked(event):
                     if day_actions:
-                        repeat_box.open("Repeat for how many more days?", max_value=30)
+                        # Cap repeats based on week/day-of-week to enforce game flow
+                        if week_count == 1:
+                            if day_in_week <= 5:      # weekday: fill remaining week
+                                max_rep = 5 - day_in_week
+                            else:                     # Saturday: copy onto Sunday only
+                                max_rep = 1
+                        else:
+                            max_rep = 30
+                        if max_rep > 0:
+                            repeat_box.open("Repeat for how many more days?", max_value=max_rep)
+                        else:
+                            messages = ["No repeats available for this day."]
                     else:
                         messages = ["No actions recorded to repeat."]
 
@@ -705,7 +789,7 @@ while running:
                 if quit_btn.clicked(event):
                     current_screen_state = SAVE_PROMPT
 
-    # ── Active replay tick (day runner) ─────────────────────────────────
+    # Active replay tick (day runner)
     if (current_screen_state == DAY_END_SCREEN
             and replay_runner is not None
             and not replay_runner.done
@@ -733,7 +817,7 @@ while running:
                 while len(week_actions) < new_diy - 1:
                     week_actions.append(list(day_actions))
 
-    # ── Active replay tick (week runner) ────────────────────────────────
+    # Active replay tick (week runner)
     if (current_screen_state == DAY_END_SCREEN
             and week_replay_runner is not None
             and not week_replay_runner.done
@@ -744,10 +828,65 @@ while running:
         if alert_info:
             alert_box.open(*alert_info)
         messages = week_replay_runner.last_msgs()
-        day_count  = week_replay_runner.current_day   # day_in_week/week_count derived next frame
+        day_count = week_replay_runner.current_day
+        week_count = week_replay_runner.current_week
+        day_in_week = week_replay_runner.current_day_in_week
         time_of_day = week_replay_runner.time_cursor
+        if week_replay_runner.current_action:
+            current_game_bg = bg_map.get(week_replay_runner.current_action, bg_map['default'])
         if week_replay_runner.done and week_replay_runner.burnout_occurred:
             burnout_active = True
+            current_game_bg = bg_map['burnout']
+
+    # Class interrupt trigger (GAME_SCREEN, weekdays only)
+    if (current_screen_state == GAME_SCREEN
+            and not day_over
+            and not class_interrupt_box.active
+            and not alert_box.active
+            and not input_box.active
+            and not repeat_box.active):
+
+        _trigger_diw = ((day_count - 1) % 7) + 1
+        _trigger_week = ((day_count - 1) // 7) + 1
+
+        # Repopulate the class list whenever the day has changed
+        if day_count != _classes_populated_for_day:
+            todays_classes.clear()
+            _classes_populated_for_day = day_count
+            todays_classes.extend(
+                get_todays_classes(course_manager.courses, _trigger_diw, _trigger_week)
+            )
+
+        # Check for classes that are due or have passed
+        for (start_h, end_h, cls_course) in todays_classes:
+            if start_h in _classes_resolved:
+                continue
+
+            if time_of_day > end_h:
+                # Class window is completely over — silently mark as missed
+                _classes_resolved.add(start_h)
+                continue
+
+            if time_of_day >= start_h:
+                # Class is currently in session — prompt or auto-attend
+                if class_interrupt_box.attend_all:
+                    _classes_resolved.add(start_h)
+                    new_msgs = student.attend_class(cls_course)
+                    record_action('attend_class', 1.25, cls_course)
+                    # Jump clock to the actual end of the class period
+                    time_of_day = max(time_of_day, end_h)
+                    current_game_bg = bg_map['attend_class']
+                    print(f"Auto-attended {cls_course.name}. Time: {format_time(time_of_day)}")
+                    if new_msgs:
+                        messages.extend(new_msgs)
+                        messages = messages[-5:]
+                    _check_day_end(messages)
+                else:
+                    # Show the interrupt prompt
+                    _pending_class = (start_h, end_h, cls_course)
+                    att_pct = cls_course.get_attendance_percentage()
+                    class_interrupt_box.open(cls_course, start_h, end_h, att_pct)
+                break   # only one interrupt at a time
 
     # Track the last real screen (not the prompt) for backdrop rendering
     if current_screen_state != SAVE_PROMPT:
@@ -803,6 +942,7 @@ while running:
         input_box.draw(screen)
         repeat_box.draw(screen)
         alert_box.draw(screen)
+        class_interrupt_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
