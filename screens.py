@@ -155,3 +155,133 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
     if week_repeat_box is not None:
         week_repeat_box.draw(screen)
     alert_box.draw(screen)
+
+
+def exam_screen(screen, exam_type, continue_btn, font):
+    """Full-screen splash shown for mid or final exams."""
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    # Dark gradient background
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        r = int(10 + 30 * t)
+        g = int(10 + 10 * t)
+        b = int(40 + 60 * t)
+        pygame.draw.line(bg, (r, g, b), (0, y), (WIDTH, y))
+    screen.blit(bg, (0, 0))
+
+    # Decorative top bar
+    pygame.draw.rect(screen, (100, 80, 200), (0, 0, WIDTH, 6))
+
+    # Card
+    card_w, card_h = 560, 280
+    card_x = (WIDTH - card_w) // 2
+    card_y = (HEIGHT - card_h) // 2 - 30
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((20, 20, 50, 220))
+    screen.blit(card_surf, (card_x, card_y))
+    pygame.draw.rect(screen, (120, 100, 220), (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+    title_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 38)
+    sub_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+
+    if exam_type == "mid":
+        title_text   = "Midterm Exams"
+        sub_text     = "Weeks 1-7 are behind you."
+        detail_text  = "Show what you've learned!"
+        color_accent = (200, 160, 255)
+    else:
+        title_text   = "Final Exams"
+        sub_text     = "The semester has been a journey."
+        detail_text  = "Give it everything you've got!"
+        color_accent = (255, 200, 100)
+
+    # Emoji icon simulation via colored circle
+    pygame.draw.circle(screen, color_accent,
+                       (WIDTH // 2, card_y + 52), 26)
+    pygame.draw.circle(screen, (20, 20, 50),
+                       (WIDTH // 2, card_y + 52), 20)
+
+    title_surf = title_font.render(title_text, True, color_accent)
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, card_y + 86))
+
+    sub_surf = sub_font.render(sub_text, True, (210, 210, 255))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, card_y + 138))
+
+    detail_surf = detail_font.render(detail_text, True, (160, 160, 200))
+    screen.blit(detail_surf, (WIDTH // 2 - detail_surf.get_width() // 2, card_y + 170))
+
+    # Divider
+    pygame.draw.line(screen, (80, 80, 140),
+                     (card_x + 40, card_y + 210), (card_x + card_w - 40, card_y + 210), 1)
+
+    hint_surf = detail_font.render("Press Continue when you're ready.", True, (130, 130, 170))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + 224))
+
+    continue_btn.draw(screen)
+
+
+def semester_end_screen(screen, student, avg_knowledge, quit_btn, font):
+    """Shown after the final exam — semester complete!"""
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    # Dark background
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        r = int(5 + 20 * t)
+        g = int(20 + 40 * t)
+        b = int(10 + 30 * t)
+        pygame.draw.line(bg, (r, g, b), (0, y), (WIDTH, y))
+    screen.blit(bg, (0, 0))
+    pygame.draw.rect(screen, (60, 200, 100), (0, 0, WIDTH, 6))
+
+    title_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 42)
+    sub_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    stat_font   = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+
+    # Card
+    card_w, card_h = 580, 340
+    card_x = (WIDTH - card_w) // 2
+    card_y = (HEIGHT - card_h) // 2 - 20
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((10, 30, 20, 220))
+    screen.blit(card_surf, (card_x, card_y))
+    pygame.draw.rect(screen, (60, 200, 100), (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+    # Gold star decoration
+    pygame.draw.circle(screen, (255, 220, 50), (WIDTH // 2, card_y + 44), 28)
+    pygame.draw.circle(screen, (10, 30, 20),   (WIDTH // 2, card_y + 44), 20)
+
+    title_surf = title_font.render("Semester Complete!", True, (100, 255, 140))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, card_y + 76))
+
+    sub_surf = sub_font.render("You survived 15 weeks — congratulations!", True, (200, 255, 220))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, card_y + 126))
+
+    # Stat summary
+    pygame.draw.line(screen, (40, 120, 60),
+                     (card_x + 50, card_y + 162), (card_x + card_w - 50, card_y + 162), 1)
+
+    stats = [
+        ("Knowledge",   f"{avg_knowledge:.1f} / 100",  (120, 220, 255)),
+        ("Health",      f"{student.health:.1f} / 100", (255, 140, 140)),
+        ("Stress",      f"{student.stress:.1f} / 100", (255, 200,  80)),
+        ("Motivation",  f"{student.motivation:.1f} / 100", (160, 255, 160)),
+    ]
+    col_x = [card_x + 60, card_x + 60 + (card_w - 120) // 2]
+    for i, (label, value, color) in enumerate(stats):
+        cx = col_x[i % 2]
+        cy = card_y + 174 + (i // 2) * 38
+        lbl_surf = stat_font.render(f"{label}:", True, (160, 200, 160))
+        val_surf = stat_font.render(value, True, color)
+        screen.blit(lbl_surf, (cx, cy))
+        screen.blit(val_surf, (cx + 130, cy))
+
+    hint_surf = detail_font.render("Thanks for playing Caffeine & Chaos!", True, (100, 160, 100))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + 296))
+
+    quit_btn.draw(screen)

@@ -6,7 +6,7 @@ from courses import CourseManager
 from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
 from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder, ClassInterruptBox
-from screens import main_menu, game_screen, day_end_screen, save_prompt_screen
+from screens import main_menu, game_screen, day_end_screen, save_prompt_screen, exam_screen, semester_end_screen
 from savegame import save_game, load_game, delete_save, save_exists
 
 # Window & clock
@@ -354,8 +354,33 @@ MAIN_MENU = "main_menu"
 SETUP_SCREEN = "setup_screen"
 GAME_SCREEN = "game_screen"
 DAY_END_SCREEN = "day_end_screen"
+EXAM_SCREEN = "exam_screen"
+SEMESTER_END_SCREEN = "semester_end_screen"
 SAVE_PROMPT = "save_prompt"
 current_screen_state = MAIN_MENU
+
+# Semester tracking
+exam_type = "mid"   # "mid" or "final"
+
+
+def get_semester_phase(wk: int) -> str:
+    """Return the current semester phase based on week number."""
+    if wk <= 7:
+        return "pre_mid"
+    elif wk <= 15:
+        return "post_mid"
+    else:
+        return "done"
+
+
+def _max_week_repeats(wk: int) -> int:
+    """Maximum additional weeks a player may replay from week wk."""
+    phase = get_semester_phase(wk)
+    if phase == "pre_mid":
+        return max(0, 7 - wk)
+    elif phase == "post_mid":
+        return max(0, 15 - wk)
+    return 0
 
 # Assets
 main_bg = pygame.image.load("assets/images/main.jpg")
@@ -428,6 +453,10 @@ repeat_btn = Button(_gap * 2 + _btn_w, _btn_y, _btn_w, 40, "Repeat Day", button_
 repeat_week_btn = Button(_gap * 3 + _btn_w * 2, _btn_y, _btn_w, 40, "Repeat Week", button_font)
 quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font)
 
+# Exam screen / semester end continue button (centred)
+exam_continue_btn   = Button(WIDTH // 2 - 60, HEIGHT // 2 + 110, 120, 40, "Continue", button_font)
+sem_quit_btn        = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
+
 # Save-prompt buttons (shown in the SAVE_PROMPT overlay)
 _sp_y = HEIGHT // 2 + 20
 _sp_gap = 20
@@ -482,12 +511,12 @@ while running:
         eat_btn.enabled = student.action_status['eat'] and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
 
-    # Week-1 flow constraints
-    if week_count == 1 and day_in_week == 7:  # Sunday of week 1: can't repeat day
+    # Phase-start flow constraints (week 1 = start of semester; week 8 = start of post-mid)
+    if week_count in (1, 8) and day_in_week == 7:  # Sunday of phase week 1: can't repeat day
         repeat_btn.enabled = False
     else:
         repeat_btn.enabled = not burnout_active
-    # Repeat Week: enabled once the first full week (day 7) is complete
+    # Repeat Week: enabled once a full week (day 7) is complete
     repeat_week_btn.enabled = not burnout_active and day_in_week == 7
 
     # Event handling
@@ -759,18 +788,27 @@ while running:
                     todays_classes.clear()
                     _classes_resolved.clear()
                     class_interrupt_box.attend_all = False
-                    current_screen_state = GAME_SCREEN
+                    # --- Semester milestone check (boundary-crossing) ---
+                    if week_count < 8 and new_wk >= 8:    # crossed into post-mid → mid exam
+                        exam_type = "mid"
+                        current_screen_state = EXAM_SCREEN
+                    elif week_count < 16 and new_wk >= 16:  # crossed out of week 15 → final exam
+                        exam_type = "final"
+                        current_screen_state = EXAM_SCREEN
+                    else:
+                        current_screen_state = GAME_SCREEN
 
                 if repeat_btn.clicked(event):
                     if day_actions:
                         # Cap repeats based on week/day-of-week to enforce game flow
-                        if week_count == 1:
+                        SEMESTER_LAST_DAY = 7 * 15  # day 105 = end of week 15
+                        if week_count in (1, 8):  # first week of each phase
                             if day_in_week <= 5:      # weekday: fill remaining week
                                 max_rep = 5 - day_in_week
                             else:                     # Saturday: copy onto Sunday only
                                 max_rep = 1
-                        else:
-                            max_rep = 30
+                        else:                      # last week or standard week
+                            max_rep = min(30, SEMESTER_LAST_DAY - day_count)
                         if max_rep > 0:
                             repeat_box.open("Repeat for how many more days?", max_value=max_rep)
                         else:
@@ -782,12 +820,39 @@ while running:
                     if week_actions or day_actions:
                         # Build full 7-day snapshot (previous 6 days + today)
                         _full_week_snapshot = list(week_actions) + [list(day_actions)]
-                        week_repeat_box.open("Repeat this week for how many more weeks?", max_value=52)
+                        max_wk = _max_week_repeats(week_count)
+                        if max_wk > 0:
+                            week_repeat_box.open(
+                                "Repeat this week for how many more weeks?",
+                                max_value=max_wk
+                            )
+                        else:
+                            messages = ["No more weeks available — exam time!"]
                     else:
                         messages = ["No actions recorded this week."]
 
                 if quit_btn.clicked(event):
                     current_screen_state = SAVE_PROMPT
+
+        # Exam Screen
+        elif current_screen_state == EXAM_SCREEN:
+            if exam_continue_btn.clicked(event):
+                if exam_type == "final":
+                    current_screen_state = SEMESTER_END_SCREEN
+                else:
+                    # Mid exam done → resume game at current day (week 8 day 1)
+                    day_over = False
+                    current_game_bg = bg_map['default']
+                    daily_outages = wifi_failure_event()
+                    todays_classes.clear()
+                    _classes_resolved.clear()
+                    class_interrupt_box.attend_all = False
+                    current_screen_state = GAME_SCREEN
+
+        # Semester End Screen
+        elif current_screen_state == SEMESTER_END_SCREEN:
+            if sem_quit_btn.clicked(event):
+                running = False
 
     # Active replay tick (day runner)
     if (current_screen_state == DAY_END_SCREEN
@@ -837,6 +902,15 @@ while running:
         if week_replay_runner.done and week_replay_runner.burnout_occurred:
             burnout_active = True
             current_game_bg = bg_map['burnout']
+        # Check for exam milestone after week replay finishes
+        if week_replay_runner.done and not week_replay_runner.burnout_occurred:
+            # current_week is the last week the runner was in (7 or 15)
+            if week_count == 7 and day_in_week == 7:
+                exam_type = "mid"
+                current_screen_state = EXAM_SCREEN
+            elif week_count == 15 and day_in_week == 7:
+                exam_type = "final"
+                current_screen_state = EXAM_SCREEN
 
     # Class interrupt trigger (GAME_SCREEN, weekdays only)
     if (current_screen_state == GAME_SCREEN
@@ -958,6 +1032,13 @@ while running:
             repeat_week_btn=repeat_week_btn,
             week_repeat_box=week_repeat_box,
         )
+
+    elif current_screen_state == EXAM_SCREEN:
+        exam_screen(screen, exam_type, exam_continue_btn, message_font)
+
+    elif current_screen_state == SEMESTER_END_SCREEN:
+        avg_k = course_manager.get_average_knowledge()
+        semester_end_screen(screen, student, avg_k, sem_quit_btn, message_font)
 
     pygame.display.flip()
     clock.tick(60)
