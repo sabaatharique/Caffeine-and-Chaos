@@ -52,9 +52,10 @@ class Student:
         self.rest_health_rate = 3    
         self.rest_health_rate = 3    
 
-        self.relax_stress_rate = 8 
-        self.relax_sleep_rate = 3       
-        self.relax_motivation_rate = 5    
+        self.relax_stress_rate = 8
+        self.relax_sleep_rate = 3
+        self.relax_motivation_rate = 5
+        self.relax_health_rate = 5       # health gained per hour of relaxing
 
         self.eat_health_gain = 10    
         self.eat_hunger_reduction = 40    
@@ -80,7 +81,7 @@ class Student:
         self.update_action_status()  # Initial update
 
     def update_action_status(self):
-        self.action_status['study'] = self.sleep > 0
+        self.action_status['study'] = self.sleep > 0 and self.health > 0
         self.action_status['sleep'] = self.sleep < 100
         self.action_status['relax'] = True
         self.action_status['eat'] = self.health < 100 or self.hunger > 0
@@ -237,7 +238,10 @@ class Student:
     def study(self, course, hours=2.0, avg_knowledge=30.0, wifi_penalty=False):
         messages = []
         if not self.action_status['study']:
-            messages.append("You are too tired to study.")
+            if self.health <= 0:
+                messages.append("You are too ill to study. Rest or relax to regain your health!")
+            else:
+                messages.append("You are too tired to study.")
             return messages
         # Study efficiency depends on current state (using average knowledge for global efficiency)
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation) + avg_knowledge) / 500
@@ -247,14 +251,16 @@ class Student:
 
         gain = hours * self.study_knowledge_rate * efficiency * knowledge_mult
         course.add_knowledge(gain)
-        
-        self.sleep -= hours * self.study_sleep_rate
+
+        self.sleep  -= hours * self.study_sleep_rate
         self.stress += hours * self.study_stress_rate
         if wifi_penalty:
             self.stress += hours * self.wifi_stress_penalty
         self.health -= hours * self.study_health_rate
 
         messages.extend(self.clamp())
+        # If studying drained health to 0, trigger immediate sickness
+        messages.extend(self.check_health_collapse())
         return messages
 
     def rest(self, hours=1.0):
@@ -321,10 +327,27 @@ class Student:
     def take_break(self, hours=1.0):
         messages = []
         self.stress -= hours * self.relax_stress_rate
-        self.sleep -= hours * self.relax_sleep_rate
+        self.sleep  -= hours * self.relax_sleep_rate
         self.motivation += hours * self.relax_motivation_rate
+        self.health += hours * self.relax_health_rate   # relaxing restores health
 
         messages.extend(self.clamp())
+        return messages
+
+    def check_health_collapse(self):
+        """Call after any health-draining action.
+        If health just hit 0, trigger immediate sickness so the player is
+        forced to rest/relax before studying again.
+        Returns a list of messages (empty if nothing happened).
+        """
+        messages = []
+        if not self.is_sick and self.health <= 0:
+            self.is_sick = True
+            self.sick_days_remaining = self._generate_sick_duration()
+            self.stress += 15          # exhaustion spike
+            messages.append("[SICK!] Your health hit zero! You've collapsed from exhaustion.")
+            messages.append("[SICK!] You MUST rest or relax. Study and class are blocked until you recover.")
+            messages.extend(self.clamp())
         return messages
 
     def max_hours(self, action):

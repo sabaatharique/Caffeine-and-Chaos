@@ -421,7 +421,6 @@ class AlertBox:
         self.title = ""
         self.body = ""
         self.color_type = "red"  # "red", "yellow", or "sickness"
-        self.icon_tag = ""       # Large character to show (e.g., '!')
         
         # Color themes
         self._themes = {
@@ -459,12 +458,11 @@ class AlertBox:
             }
         }
 
-    def open(self, title: str, body: str, color_type: str = "red", icon_tag: str = ""):
+    def open(self, title: str, body: str, color_type: str = "red"):
         self.active = True
         self.title = title
         self.body = body
         self.color_type = color_type if color_type in self._themes else "red"
-        self.icon_tag = icon_tag
 
     def handle_event(self, event):
         if not self.active:
@@ -500,14 +498,6 @@ class AlertBox:
         # Thicker border for sickness
         border_thickness = 4 if self.color_type == "sickness" else 2
         pygame.draw.rect(screen, theme["border"], box_rect, border_thickness, border_radius=10)
-
-        # Draw large background icon if present
-        if self.icon_tag:
-            # Create a very large font for the background icon
-            icon_font = pygame.font.Font("assets/fonts/Papernotes.otf", 160)
-            icon_surf = icon_font.render(self.icon_tag, True, (*theme["title"], 40)) # Lower alpha for background icon
-            icon_rect = icon_surf.get_rect(center=(box_rect.centerx, box_rect.centery))
-            screen.blit(icon_surf, icon_rect)
 
         # Title 
         title_surf = self.font.render(self.title, True, theme["title"])

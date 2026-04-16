@@ -103,8 +103,7 @@ class ReplayRunner:
                     "You've fallen ill!  Health -10, Stress +10.\n"
                     "Efficiency is halved and classes are blocked.\n"
                     "REST UP OR YOUR STATS WILL CRUMBLE!",
-                    "sickness",
-                    "!"
+                    "sickness"
                 )
             elif any("[RECOVERED]" in m for m in day_msgs):
                 alert_info = (
@@ -112,8 +111,7 @@ class ReplayRunner:
                     "You've fought off the illness and are back to full efficiency.\n"
                     "Your learning and attendance potential are restored.\n"
                     "STAY VIGILANT!",
-                    "recovery",
-                    "!"
+                    "recovery"
                 )
 
             if any("Burnout!" in m for m in day_msgs):
@@ -300,8 +298,7 @@ class WeekReplayRunner:
                     "You've fallen ill!  Health -10, Stress +10.\n"
                     "Efficiency is halved and classes are blocked.\n"
                     "REST UP OR YOUR STATS WILL CRUMBLE!",
-                    "sickness",
-                    "!"
+                    "sickness"
                 )
             elif any("[RECOVERED]" in m for m in day_msgs):
                 alert_info = (
@@ -309,8 +306,7 @@ class WeekReplayRunner:
                     "You've fought off the illness and are back to full efficiency.\n"
                     "Your learning and attendance potential are restored.\n"
                     "STAY VIGILANT!",
-                    "recovery",
-                    "!"
+                    "recovery"
                 )
 
             if any("Burnout!" in m for m in day_msgs):
@@ -548,8 +544,7 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
                 "You've fallen ill!  Health -10, Stress +10.\n"
                 "Efficiency is halved and classes are blocked.\n"
                 "REST UP OR YOUR STATS WILL CRUMBLE!",
-                color_type="sickness",
-                icon_tag="!"
+                color_type="sickness"
             )
         elif any("[RECOVERED]" in m for m in eod_msgs):
             sick_active = False
@@ -560,8 +555,7 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
                 "You've fought off the illness and are back to full efficiency.\n"
                 "Your learning and attendance potential are restored.\n"
                 "STAY VIGILANT!",
-                color_type="recovery",
-                icon_tag="!"
+                color_type="recovery"
             )
         # ── END sickness detection ─────────────────────────────────────────
         day_over = True
@@ -750,6 +744,16 @@ while running:
                     time_of_day   += hours
                     pending_action = None
                     print(f"Time of day: {format_time(time_of_day)}")
+                    # Mid-day health collapse → fire sickness alert immediately
+                    if any("[SICK!]" in m for m in new_messages) and not alert_box.active:
+                        current_game_bg = bg_map.get('sick', bg_map['burnout'])
+                        alert_box.open(
+                            "YOU'VE COLLAPSED!",
+                            "Your health hit ZERO mid-session!\n"
+                            "Study and classes are BLOCKED.\n"
+                            "REST or RELAX to start recovering.",
+                            color_type="sickness"
+                        )
                     _check_day_end(new_messages)
 
             elif not class_interrupt_box.active:
