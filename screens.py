@@ -142,7 +142,7 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
         # Larger font for sickness notice
         sick_font = pygame.font.Font("assets/fonts/Papernotes.otf", 26)
         sick_surf = sick_font.render(
-            "🤒 YOU ARE SICK: STUDY -50% | CLASSES BLOCKED",
+            " YOU ARE SICK: STUDY -50% | CLASSES BLOCKED",
             True, (255, 50, 50)
         )
         # Add a subtle background for the sickness notice to pop more
