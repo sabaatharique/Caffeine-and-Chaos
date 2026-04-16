@@ -1,4 +1,5 @@
 import math
+import random
 
 class Student:
     def __init__(self, type_mult: float = 1.0):
@@ -27,6 +28,18 @@ class Student:
         # Internal tracking
         self.consecutive_stress_days = 0
         self.burnout_days_remaining = 5
+
+        # Sickness tracking
+        self.is_sick = False
+        self.sick_days_remaining = 0
+
+        # Rolling history (last 5 days) for computing sickness probability
+        self._stress_history: list = []
+        self._health_history: list = []
+        self._HISTORY_WINDOW = 5          # days to look back
+        self._SICKNESS_BASE_PROB = 0.005  # 0.5% daily baseline
+        self._SICKNESS_MAX_PROB  = 0.10   # hard cap at 10%
+        self._RECOVERY_PROB      = 0.40   # 40% chance to recover each sick day (~2.5 day expected illness)
 
         # Action rates
         self.study_knowledge_rate = 1 * type_mult
@@ -104,6 +117,45 @@ class Student:
         self.update_action_status()
         return messages
 
+    # ── Sickness helpers ────────────────────────────────────────────────────────
+
+    def _record_daily_history(self):
+        """Snapshot today's stress & health into rolling history."""
+        self._stress_history.append(self.stress)
+        self._health_history.append(self.health)
+        # Keep only the last N days
+        if len(self._stress_history) > self._HISTORY_WINDOW:
+            self._stress_history.pop(0)
+        if len(self._health_history) > self._HISTORY_WINDOW:
+            self._health_history.pop(0)
+
+    def _compute_sickness_prob(self) -> float:
+        """Return today's Bernoulli probability of falling sick."""
+        if not self._stress_history:          # no history yet → baseline only
+            return self._SICKNESS_BASE_PROB
+
+        avg_stress = sum(self._stress_history) / len(self._stress_history)
+        avg_health = sum(self._health_history) / len(self._health_history)
+
+        stress_factor = 0.02 * (avg_stress / 100)
+        health_factor = 0.02 * (1 - avg_health / 100)
+
+        p = self._SICKNESS_BASE_PROB + stress_factor + health_factor
+        return min(p, self._SICKNESS_MAX_PROB)
+
+    def _generate_sick_duration(self) -> int:
+        """Sample illness duration from a geometric distribution."""
+        days = 0
+        while True:
+            days += 1
+            if random.random() < self._RECOVERY_PROB:
+                return days
+
+    @property
+    def sick_active(self) -> bool:
+        """True while the student is sick (mirrors burnout_active pattern)."""
+        return self.is_sick
+
     def end_of_day(self):
         messages = []
 
@@ -122,6 +174,42 @@ class Student:
             self.trigger_burnout()
             messages.append("Burnout! Your stats have taken a hit.")
 
+        # ── Sickness logic ────────────────────────────────────────────────────
+        # Always record today before checking onset so history is up-to-date
+        self._record_daily_history()
+
+        if self.is_sick:
+            # Geometric recovery trial each sick day
+            if random.random() < self._RECOVERY_PROB:
+                self.is_sick = False
+                self.sick_days_remaining = 0
+                messages.append("[RECOVERED] You're no longer sick. Welcome back!")
+            else:
+                self.sick_days_remaining = max(0, self.sick_days_remaining - 1)
+                # Daily passive effect while sick: health drains a little
+                self.health -= 5
+                self.stress += 5
+                messages.append(f"[SICK] Health -5, Stress +5. Still feeling unwell...")
+        else:
+            # Bernoulli trial for new sickness onset
+            p = self._compute_sickness_prob()
+            
+            # Request: If health becomes 0 at any point, then player should become sick
+            exhausted = self.health <= 0
+            
+            if exhausted or random.random() < p:
+                self.is_sick = True
+                self.sick_days_remaining = self._generate_sick_duration()
+                # Immediate onset penalty
+                self.health -= 10
+                self.stress += 10
+                if exhausted:
+                    messages.append("[SICK!] Your health hit zero! You've collapsed from exhaustion.")
+                else:
+                    messages.append("[SICK!] You've fallen ill! Health -10, Stress +10.")
+                messages.append("[SICK!] Study efficiency halved. Classes will be missed.")
+        # ── END sickness block ────────────────────────────────────────────────
+
         messages.extend(self.clamp())
         return messages
 
@@ -129,6 +217,10 @@ class Student:
         messages = []
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
+            return messages
+        if self.is_sick:
+            messages.append(f"You're too sick to attend {course.name}. Class missed.")
+            # Still counts against attendance — you really weren't there
             return messages
 
         course.attended_classes += 1
@@ -150,7 +242,9 @@ class Student:
         # Study efficiency depends on current state (using average knowledge for global efficiency)
         efficiency = (self.sleep + self.health + (100 - self.stress) + (100 - self.motivation) + avg_knowledge) / 500
         knowledge_mult = self.wifi_knowledge_penalty if wifi_penalty else 1.0
-        
+        if self.is_sick:
+            knowledge_mult *= 0.5   # sickness halves effective learning
+
         gain = hours * self.study_knowledge_rate * efficiency * knowledge_mult
         course.add_knowledge(gain)
         

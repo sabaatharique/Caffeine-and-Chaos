@@ -23,6 +23,7 @@ time_of_day   = DAY_START
 day_count     = 1
 day_over      = False
 burnout_active = False   # True while student is recovering from burnout
+sick_active    = False   # True while student is sick
 
 # Week tracking
 week_count = 1 # current week number (starts at 1)
@@ -94,17 +95,40 @@ class ReplayRunner:
             day_msgs = self.student.end_of_day()
             self.msgs.extend(day_msgs)
             self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
+            
+            alert_info = None
+            if any("[SICK!]" in m for m in day_msgs):
+                alert_info = (
+                    "YOU'RE SICK!",
+                    "You've fallen ill!  Health -10, Stress +10.\n"
+                    "Efficiency is halved and classes are blocked.\n"
+                    "REST UP OR YOUR STATS WILL CRUMBLE!",
+                    "sickness",
+                    "!"
+                )
+            elif any("[RECOVERED]" in m for m in day_msgs):
+                alert_info = (
+                    "RECOVERED!",
+                    "You've fought off the illness and are back to full efficiency.\n"
+                    "Your learning and attendance potential are restored.\n"
+                    "STAY VIGILANT!",
+                    "recovery",
+                    "!"
+                )
+
             if any("Burnout!" in m for m in day_msgs):
                 self.burnout_occurred = True
                 self.msgs.append("Loop paused. You need to recover!")
                 self.done = True
-                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
+            
             if self.days_done >= self.total_days:
                 self.done = True
-                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
+            
             # Start next day
             self._start_new_day()
-            return day_msgs + [f"Day {self.current_day - 1} completed (fast-forward)."], None
+            return day_msgs + [f"Day {self.current_day - 1} completed (fast-forward)."], alert_info
 
         action, hours, data = self.actions[self.action_idx]
         action_start = self.time_cursor
@@ -174,7 +198,10 @@ class ReplayRunner:
         self.current_action = action
         self.msgs.extend(new_msgs)
 
-        pygame.time.wait(300)   # slight pause so replay is watchable
+        wait_time = 300
+        if self.student.is_sick:
+            wait_time = 800  # Slow down simulation when sick to make messages readable
+        pygame.time.wait(wait_time)
         return new_msgs, None
 
     def last_msgs(self, n=5):
@@ -265,16 +292,38 @@ class WeekReplayRunner:
             day_msgs = self.student.end_of_day()
             self.msgs.extend(day_msgs)
             self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
+            
+            alert_info = None
+            if any("[SICK!]" in m for m in day_msgs):
+                alert_info = (
+                    "YOU'RE SICK!",
+                    "You've fallen ill!  Health -10, Stress +10.\n"
+                    "Efficiency is halved and classes are blocked.\n"
+                    "REST UP OR YOUR STATS WILL CRUMBLE!",
+                    "sickness",
+                    "!"
+                )
+            elif any("[RECOVERED]" in m for m in day_msgs):
+                alert_info = (
+                    "RECOVERED!",
+                    "You've fought off the illness and are back to full efficiency.\n"
+                    "Your learning and attendance potential are restored.\n"
+                    "STAY VIGILANT!",
+                    "recovery",
+                    "!"
+                )
+
             if any("Burnout!" in m for m in day_msgs):
                 self.burnout_occurred = True
                 self.done = True
-                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+                return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
+            
             self.day_in_week += 1
             # Only start next day now if there are more days this week;
             # otherwise let the week-boundary tick handle it cleanly.
             if self.day_in_week < len(self.week_actions):
                 self._start_new_day()
-            return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], None
+            return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
 
         action, hours, data = actions[self.action_idx]
         action_start = self.time_cursor
@@ -341,7 +390,10 @@ class WeekReplayRunner:
         self.current_action = action
         self.msgs.extend(new_msgs)
 
-        pygame.time.wait(50)   # faster for week replay
+        wait_time = 50
+        if self.student.is_sick:
+            wait_time = 400  # Slower for week replay when sick
+        pygame.time.wait(wait_time)
         return new_msgs, None
 
     def last_msgs(self, n=5):
@@ -392,6 +444,7 @@ bg_map  = {
     'eat':          pygame.image.load("assets/images/eat.jpg"),
     'attend_class': pygame.image.load("assets/images/class.jpg"),
     'burnout':      pygame.image.load("assets/images/burnout.jpg"),
+    'sick':         pygame.image.load("assets/images/burnout.jpg"),  # reuse burnout bg for now
     'default':      pygame.image.load("assets/images/study.jpg"),
 }
 current_game_bg = bg_map['default']
@@ -475,7 +528,7 @@ _last_game_screen: str = MAIN_MENU
 
 def _check_day_end(new_msgs: list[str]) -> list[str]:
     """Call end_of_day if the day clock has run out; return extra messages."""
-    global day_over, burnout_active, current_screen_state, current_game_bg
+    global day_over, burnout_active, sick_active, current_screen_state, current_game_bg
     if round(time_of_day * 60) >= round(DAY_END * 60):
         eod_msgs = student.end_of_day()
         new_msgs.extend(eod_msgs)
@@ -486,6 +539,31 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
             current_game_bg = bg_map['burnout']
         if any("recovered from burnout" in m for m in eod_msgs):
             burnout_active = False
+        # ── Sickness detection ─────────────────────────────────────────────
+        sick_active = student.is_sick
+        if any("[SICK!]" in m for m in eod_msgs):
+            current_game_bg = bg_map.get('sick', bg_map['burnout'])
+            alert_box.open(
+                "YOU'RE SICK!",
+                "You've fallen ill!  Health -10, Stress +10.\n"
+                "Efficiency is halved and classes are blocked.\n"
+                "REST UP OR YOUR STATS WILL CRUMBLE!",
+                color_type="sickness",
+                icon_tag="!"
+            )
+        elif any("[RECOVERED]" in m for m in eod_msgs):
+            sick_active = False
+            if not burnout_active:
+                current_game_bg = bg_map['default']
+            alert_box.open(
+                "RECOVERED!",
+                "You've fought off the illness and are back to full efficiency.\n"
+                "Your learning and attendance potential are restored.\n"
+                "STAY VIGILANT!",
+                color_type="recovery",
+                icon_tag="!"
+            )
+        # ── END sickness detection ─────────────────────────────────────────
         day_over = True
         current_screen_state = DAY_END_SCREEN
     return new_msgs
@@ -872,6 +950,8 @@ while running:
             current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
         if replay_runner.done and replay_runner.burnout_occurred:
             burnout_active = True
+        # Sync sick_active from student truth
+        sick_active = student.is_sick
         # Sync week_actions so weeks completed by replay are tracked
         if day_count != prev_day:
             new_diy = ((day_count - 1) % 7) + 1
@@ -902,6 +982,8 @@ while running:
         if week_replay_runner.done and week_replay_runner.burnout_occurred:
             burnout_active = True
             current_game_bg = bg_map['burnout']
+        # Sync sick_active from student truth
+        sick_active = student.is_sick
         # Check for exam milestone after week replay finishes
         if week_replay_runner.done and not week_replay_runner.burnout_occurred:
             # current_week is the last week the runner was in (7 or 15)
@@ -994,6 +1076,7 @@ while running:
                 week_count=week_count, day_in_week=day_in_week,
                 repeat_week_btn=repeat_week_btn,
                 week_repeat_box=week_repeat_box,
+                sick_active=sick_active,
             )
         save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
 
@@ -1031,6 +1114,7 @@ while running:
             week_count=week_count, day_in_week=day_in_week,
             repeat_week_btn=repeat_week_btn,
             week_repeat_box=week_repeat_box,
+            sick_active=sick_active,
         )
 
     elif current_screen_state == EXAM_SCREEN:

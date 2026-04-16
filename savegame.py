@@ -16,6 +16,10 @@ def _student_to_dict(student) -> dict:
         "attendance": student.attendance,
         "consecutive_stress_days": student.consecutive_stress_days,
         "burnout_days_remaining": student.burnout_days_remaining,
+        "is_sick": student.is_sick,
+        "sick_days_remaining": student.sick_days_remaining,
+        "stress_history": student._stress_history,
+        "health_history": student._health_history,
     }
 
 
@@ -31,6 +35,10 @@ def _student_from_dict(data: dict, student):
     student.attendance = data.get("attendance", 0)
     student.consecutive_stress_days = data.get("consecutive_stress_days", 0)
     student.burnout_days_remaining = data.get("burnout_days_remaining", 5)
+    student.is_sick             = data.get("is_sick", False)
+    student.sick_days_remaining = data.get("sick_days_remaining", 0)
+    student._stress_history     = data.get("stress_history", [])
+    student._health_history     = data.get("health_history", [])
     student.update_action_status()
 
 

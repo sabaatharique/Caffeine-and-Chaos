@@ -59,7 +59,16 @@ def game_screen(screen, background_image, student, bars, buttons,
 
         y_offset = msg_box_y + 10
         for msg in messages:
-            msg_surface = message_font.render(msg, True, (255, 255, 0))
+            # Colour-code sickness messages for instant recognition
+            if msg.startswith("[SICK!]"):
+                msg_color = (255, 80, 80)      # bright red — onset
+            elif msg.startswith("[SICK]"):
+                msg_color = (255, 160, 40)     # amber — still sick
+            elif msg.startswith("[RECOVERED]"):
+                msg_color = (80, 255, 140)     # lime green — recovery
+            else:
+                msg_color = (255, 255, 0)      # default yellow
+            msg_surface = message_font.render(msg, True, msg_color)
             screen.blit(msg_surface, (msg_box_x + 10, y_offset))
             y_offset += 30
 
@@ -82,7 +91,8 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
                    continue_btn, repeat_btn, quit_btn,
                    repeat_box, alert_box,
                    week_count=1, day_in_week=1,
-                   repeat_week_btn=None, week_repeat_box=None):
+                   repeat_week_btn=None, week_repeat_box=None,
+                   sick_active=False):
     """Draw the full day-end overlay (background + dim + summary + buttons)."""
     WIDTH, HEIGHT = screen.get_width(), screen.get_height()
 
@@ -127,14 +137,29 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
     wk_surf = week_label_font.render(wk_label, True, wk_color)
     screen.blit(wk_surf, (WIDTH // 2 - wk_surf.get_width() // 2, HEIGHT // 2 - 46))
 
+    # Sickness notice (shown even alongside burnout — they can co-exist)
+    if sick_active:
+        # Larger font for sickness notice
+        sick_font = pygame.font.Font("assets/fonts/Papernotes.otf", 26)
+        sick_surf = sick_font.render(
+            "🤒 YOU ARE SICK: STUDY -50% | CLASSES BLOCKED",
+            True, (255, 50, 50)
+        )
+        # Add a subtle background for the sickness notice to pop more
+        s_bg_rect = sick_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30))
+        s_bg_rect.inflate_ip(20, 10)
+        pygame.draw.rect(screen, (40, 0, 0, 200), s_bg_rect, border_radius=5)
+        screen.blit(sick_surf, (WIDTH // 2 - sick_surf.get_width() // 2, HEIGHT // 2 - 40))
+
     # Burnout notice OR continue prompt
+    notice_y = HEIGHT // 2 + (16 if sick_active else 0)
     if burnout_active:
         burnout_surf = message_font.render(
             f"You're burned out and need to recover for {student.burnout_days_remaining} days!",
             True, (255, 90, 90)
         )
         screen.blit(burnout_surf,
-                    (WIDTH // 2 - burnout_surf.get_width() // 2, HEIGHT // 2 - 10))
+                    (WIDTH // 2 - burnout_surf.get_width() // 2, notice_y - 10))
     else:
         if day_in_week == 7:
             prompt_text = "Week complete! Continue, repeat day, repeat whole week, or quit?"
@@ -143,7 +168,7 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
             prompt_text = f"Continue, repeat today, or quit?  ({days_left} day(s) until Repeat Week)"
         prompt_surf = message_font.render(prompt_text, True, (200, 200, 200))
         screen.blit(prompt_surf,
-                    (WIDTH // 2 - prompt_surf.get_width() // 2, HEIGHT // 2 + 6))
+                    (WIDTH // 2 - prompt_surf.get_width() // 2, notice_y + 6))
 
     # Buttons & widgets
     continue_btn.draw(screen)

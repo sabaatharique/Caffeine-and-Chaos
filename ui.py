@@ -420,31 +420,51 @@ class AlertBox:
         self.active = False
         self.title = ""
         self.body = ""
-        self.color_type = "red"  # "red" or "yellow"
+        self.color_type = "red"  # "red", "yellow", or "sickness"
+        self.icon_tag = ""       # Large character to show (e.g., '!')
         
         # Color themes
         self._themes = {
+            "sickness": {
+                "bg": (80, 20, 20),
+                "border": (255, 30, 30),
+                "title": (255, 100, 100),
+                "btn": (200, 30, 30),
+                "btn_border": (255, 150, 150),
+                "overlay_tint": (100, 0, 0, 100)
+            },
+            "recovery": {
+                "bg": (20, 60, 20),
+                "border": (80, 255, 80),
+                "title": (100, 255, 100),
+                "btn": (40, 180, 40),
+                "btn_border": (120, 255, 120),
+                "overlay_tint": (0, 100, 0, 100)
+            },
             "red": {
                 "bg": (60, 20, 20),
                 "border": (255, 80, 80),
                 "title": (255, 80, 80),
                 "btn": (180, 40, 40),
-                "btn_border": (255, 120, 120)
+                "btn_border": (255, 120, 120),
+                "overlay_tint": (0, 0, 0, 180)
             },
             "yellow": {
                 "bg": (60, 60, 20),
                 "border": (255, 220, 0),
                 "title": (255, 220, 0),
                 "btn": (180, 160, 40),
-                "btn_border": (255, 230, 120)
+                "btn_border": (255, 230, 120),
+                "overlay_tint": (0, 0, 0, 180)
             }
         }
 
-    def open(self, title: str, body: str, color_type: str = "red"):
+    def open(self, title: str, body: str, color_type: str = "red", icon_tag: str = ""):
         self.active = True
         self.title = title
         self.body = body
         self.color_type = color_type if color_type in self._themes else "red"
+        self.icon_tag = icon_tag
 
     def handle_event(self, event):
         if not self.active:
@@ -465,8 +485,9 @@ class AlertBox:
 
         theme = self._themes[self.color_type]
 
+        # Use theme-specific overlay tint
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill(theme["overlay_tint"])
         screen.blit(overlay, (0, 0))
 
         box_w, box_h = 540, 220 
@@ -475,7 +496,18 @@ class AlertBox:
         box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
 
         pygame.draw.rect(screen, theme["bg"], box_rect, border_radius=10)
-        pygame.draw.rect(screen, theme["border"], box_rect, 2, border_radius=10)
+        
+        # Thicker border for sickness
+        border_thickness = 4 if self.color_type == "sickness" else 2
+        pygame.draw.rect(screen, theme["border"], box_rect, border_thickness, border_radius=10)
+
+        # Draw large background icon if present
+        if self.icon_tag:
+            # Create a very large font for the background icon
+            icon_font = pygame.font.Font("assets/fonts/Papernotes.otf", 160)
+            icon_surf = icon_font.render(self.icon_tag, True, (*theme["title"], 40)) # Lower alpha for background icon
+            icon_rect = icon_surf.get_rect(center=(box_rect.centerx, box_rect.centery))
+            screen.blit(icon_surf, icon_rect)
 
         # Title 
         title_surf = self.font.render(self.title, True, theme["title"])
