@@ -5,7 +5,9 @@ from student import Student
 from courses import CourseManager
 from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
-from ui import StatusBar, Button, InputBox, NumberBox, AlertBox, SetupWizard, ScheduleBuilder, ClassInterruptBox
+from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
+                SetupWizard, ScheduleBuilder, ClassInterruptBox,
+                QuizResultBox, AcademicDashboard, QuizWeekPromptBox)
 from screens import main_menu, game_screen, day_end_screen, save_prompt_screen, exam_screen, semester_end_screen
 from savegame import save_game, load_game, delete_save, save_exists
 
@@ -45,6 +47,11 @@ todays_classes: list = []   # [(start_h, end_h, course), ...]
 _classes_resolved: set = set() # start_hours already handled today
 _pending_class: tuple | None = None  # class currently shown in interrupt box
 _classes_populated_for_day: int = 0  # day_count when todays_classes was last built
+
+# ── Quiz interrupt state ───────────────────────────────────────────────────
+_quizzes_resolved_today: set = set()
+# Each element is a tuple: (course_name, week, day_idx)
+# Reset every time day_count increments, the same way _classes_resolved is reset.
 
 
 def record_action(action: str, hours: float, data=None):
@@ -154,6 +161,8 @@ class ReplayRunner:
 
         # Run the action
         new_msgs = []
+        _diw = ((self.current_day - 1) % 7) + 1
+        _week = ((self.current_day - 1) // 7) + 1
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
 
@@ -181,8 +190,6 @@ class ReplayRunner:
             new_msgs.extend(self.student.apply_hunger_decay(0.25))
             new_msgs.extend(self.student.drink_coffee())
         elif action == 'attend_class':
-            _diw = ((self.current_day - 1) % 7) + 1
-            _week = ((self.current_day - 1) // 7) + 1
             if _diw <= 5:  # weekdays only
                 _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
                 _actual = next((c for (s, e, c) in _todays if abs(s - action_start) < 0.1), None)
@@ -190,6 +197,44 @@ class ReplayRunner:
                 _actual = None  # no classes on weekends
             if _actual:
                 new_msgs.extend(self.student.attend_class(_actual))
+
+        # ── Silent Class Resolution (for missed classes during replay) ──
+        if _diw <= 5:
+            _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
+            for s, e, c in _todays:
+                # If a class slot ended during this action jump and we didn't attend it
+                if action_start < e <= action_end and action != 'attend_class':
+                    c.occurred_classes += 1
+
+        # ── Quiz auto-resolution (during fast-forward) ──
+        from environment import SLOT_TIMES
+        for c in self.course_manager.courses:
+            if c.course_type != "Theory":
+                continue
+            for quiz in c.scheduled_quizzes:
+                if quiz["taken"]:
+                    continue
+                # Match week + day (ReplayRunner uses raw day_count)
+                _q_wk = ((self.current_day - 1) // 7) + 1
+                _q_diw = ((self.current_day - 1) % 7) + 1
+                if quiz["week"] != _q_wk or quiz["day_idx"] != (_q_diw - 1):
+                    continue
+                
+                start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
+                if action_start <= start_h < action_end or self.time_cursor >= start_h:
+                    quiz["taken"] = True
+                    if self.student.is_sick:
+                        quiz["missed"] = True
+                        quiz["mark"]   = 0.0
+                        c.quiz_marks.append(0.0)
+                    else:
+                        c.generate_quiz_mark(
+                            stress=self.student.stress,
+                            sleep=self.student.sleep / 100.0,
+                            health=self.student.health,
+                        )
+                        if c.quiz_marks:
+                            quiz["mark"] = c.quiz_marks[-1]
 
         self.time_cursor    = action_end
         self.action_idx    += 1
@@ -234,6 +279,7 @@ class WeekReplayRunner:
         self.done = False
         self.burnout_occurred = False
         self.current_action = None
+        self.quiz_week_pending = False   # True when next week has quizzes — awaiting player choice
 
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
@@ -259,6 +305,23 @@ class WeekReplayRunner:
         """1-based day index within the replaying week."""
         return self.day_in_week + 1
 
+    def get_next_week_quizzes(self) -> list:
+        """Return (day_str, time_str, course_name) for untaken quizzes in current_week."""
+        from environment import SLOT_TIMES, DAYS_OF_WEEK, format_time
+        result = []
+        for course in self.course_manager.courses:
+            if course.course_type != "Theory":
+                continue
+            for quiz in course.scheduled_quizzes:
+                if quiz["taken"]:
+                    continue
+                if quiz["week"] == self.current_week:
+                    day_str  = DAYS_OF_WEEK[quiz["day_idx"]]
+                    start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
+                    time_str = format_time(start_h)
+                    result.append((day_str, time_str, course.name))
+        return result
+
     # tick
     def tick(self):
         """Advance by one action; return (new_msgs, alert_info)."""
@@ -277,7 +340,14 @@ class WeekReplayRunner:
             if self.weeks_done >= self.total_weeks:
                 self.done = True
                 return [f"Week {completed_week} completed (fast-forward)."], None
-            # More weeks to replay — start day 1 of next week
+            # Check if the new week has any upcoming quizzes
+            quizzes = self.get_next_week_quizzes()
+            if quizzes:
+                self.quiz_week_pending = True
+                msg = f"Week {completed_week} done! Week {self.current_week} has quizzes scheduled."
+                self.msgs.append(msg)
+                return [msg], None   # Pause — main loop will handle the prompt
+            # No quizzes — start next week immediately
             self._start_new_day()
             msg = f"Week {completed_week} done! Week {self.current_week} begins (fast-forward)."
             self.msgs.append(msg)
@@ -343,6 +413,8 @@ class WeekReplayRunner:
 
         # Run action
         new_msgs = []
+        _diw = ((self.current_day - 1) % 7) + 1
+        _week = ((self.current_day - 1) // 7) + 1
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
 
@@ -371,8 +443,6 @@ class WeekReplayRunner:
             new_msgs.extend(self.student.drink_coffee())
         elif action == 'attend_class':
             # Use the class actually scheduled on this replay day at this time slot.
-            _diw = ((self.current_day - 1) % 7) + 1
-            _week = ((self.current_day - 1) // 7) + 1
             if _diw <= 5:
                 _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
                 _actual = next((c for (s, e, c) in _todays if abs(s - action_start) < 0.1), None)
@@ -380,6 +450,41 @@ class WeekReplayRunner:
                 _actual = None
             if _actual:
                 new_msgs.extend(self.student.attend_class(_actual))
+
+        # ── Silent Class Resolution (for missed classes during replay) ──
+        if _diw <= 5:
+            _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
+            for s, e, c in _todays:
+                if action_start < e <= action_end and action != 'attend_class':
+                    c.occurred_classes += 1
+
+        # ── Quiz auto-resolution (during fast-forward) ──
+        from environment import SLOT_TIMES
+        for c in self.course_manager.courses:
+            if c.course_type != "Theory":
+                continue
+            for quiz in c.scheduled_quizzes:
+                if quiz["taken"]:
+                    continue
+                # Match week + day (WeekReplayRunner has dedicated counters)
+                if quiz["week"] != self.current_week or quiz["day_idx"] != (self.current_day_in_week - 1):
+                    continue
+                
+                start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
+                if action_start <= start_h < action_end or self.time_cursor >= start_h:
+                    quiz["taken"] = True
+                    if self.student.is_sick:
+                        quiz["missed"] = True
+                        quiz["mark"]   = 0.0
+                        c.quiz_marks.append(0.0)
+                    else:
+                        c.generate_quiz_mark(
+                            stress=self.student.stress,
+                            sleep=self.student.sleep / 100.0,
+                            health=self.student.health,
+                        )
+                        if c.quiz_marks:
+                            quiz["mark"] = c.quiz_marks[-1]
 
         self.time_cursor  = action_end
         self.action_idx  += 1
@@ -460,6 +565,13 @@ repeat_box = NumberBox(message_font, input_font)
 alert_box  = AlertBox(alert_title_font, alert_body_font)
 class_interrupt_box = ClassInterruptBox(button_font, input_font)
 wizard     = SetupWizard(message_font, input_font, button_font)
+quiz_result_box = QuizResultBox(WIDTH, HEIGHT)
+quiz_week_prompt_box = QuizWeekPromptBox(alert_title_font, alert_body_font)
+academic_dashboard = AcademicDashboard(
+    WIDTH, HEIGHT,
+    message_font,
+    message_font,
+)
 
 pending_action: str | None = None
 
@@ -490,6 +602,8 @@ sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", butt
 relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
 drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
 eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
+
+dashboard_btn = None   # Removed as it's now persistent
 game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
@@ -564,8 +678,13 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
 
 
 # Main loop
+clock = pygame.time.Clock()
+dt = 0
 running = True
 while running:
+    dt = clock.tick(60) / 1000.0
+    academic_dashboard.update(dt)
+    
     remaining_hours = DAY_END - time_of_day
 
     # Derive week tracking from day_count (always consistent, works with any runner)
@@ -600,6 +719,14 @@ while running:
             else:
                 current_screen_state = SAVE_PROMPT
 
+        # Quiz result box dismissal
+        if quiz_result_box.handle_event(event):
+            continue    # event consumed; don't pass to buttons below
+
+        # Academic dashboard expansion/collapse
+        if academic_dashboard.handle_event(event):
+            continue
+
         # Save Prompt
         if current_screen_state == SAVE_PROMPT:
             if save_yes_btn.clicked(event):
@@ -609,6 +736,7 @@ while running:
                     burnout_active, day_over,
                     day_actions, week_actions,
                     classes_resolved=_classes_resolved,
+                    quizzes_resolved=_quizzes_resolved_today,
                     attend_all_today=class_interrupt_box.attend_all,
                 )
                 running = False
@@ -640,9 +768,20 @@ while running:
                     # Restore class interrupt state
                     _classes_resolved.clear()
                     _classes_resolved.update(loaded.get("classes_resolved_today", set()))
+                    # Restore quiz interrupt state
+                    _quizzes_resolved_today.clear()
+                    _quizzes_resolved_today.update(loaded.get("quizzes_resolved_today", set()))
+
                     class_interrupt_box.attend_all = loaded.get("attend_all_today", False)
                     daily_outages = wifi_failure_event()
                     messages = [f"Welcome back! Week {week_count} - {day_name(day_in_week)} (Day {day_count})"]
+
+                    # Guard for old saves: generate quizzes if missing
+                    for c in course_manager.courses:
+                        if c.course_type == "Theory" and not c.scheduled_quizzes:
+                            course_manager.schedule_all_quizzes()
+                            break
+
                     # Route to the correct screen based on saved state
                     if day_over:
                         _last_game_screen = DAY_END_SCREEN
@@ -665,6 +804,7 @@ while running:
             if wizard.done:
                 # Apply the schedule grid to each Course object
                 course_manager.apply_schedule(wizard.result.get("schedule", {}))
+                course_manager.schedule_all_quizzes()
                 wizard._schedule_initialised = False
                 current_screen_state = GAME_SCREEN
 
@@ -690,6 +830,7 @@ while running:
                         _check_day_end(messages)
                     elif class_result == "skip":
                         # Small motivation penalty for skipping
+                        p_course.occurred_classes += 1   # class happened; player chose not to go
                         student.motivation -= 2
                         student.clamp()
                         messages.append(f"Skipped {p_course.name}.")
@@ -799,6 +940,65 @@ while running:
                 messages.extend(new_messages)
                 messages = messages[-5:]
 
+            # ── Quiz interrupt trigger (GAME_SCREEN, weekdays only) ─────────────────
+            if (current_screen_state == GAME_SCREEN
+                    and not day_over
+                    and not class_interrupt_box.active   # don't stack interrupts
+                    and not quiz_result_box.active
+                    and not alert_box.active
+                    and not input_box.active
+                    and day_in_week <= 5):               # no quizzes on weekends
+
+                for course in course_manager.courses:
+                    if course.course_type != "Theory":
+                        continue
+                    for quiz in course.scheduled_quizzes:
+                        if quiz["taken"]:
+                            continue
+
+                        key = (course.name, quiz["week"], quiz["day_idx"])
+                        if key in _quizzes_resolved_today:
+                            continue
+
+                        # Does this quiz match today?
+                        if quiz["week"] != week_count:
+                            continue
+                        if quiz["day_idx"] != (day_in_week - 1):   # day_idx is 0-based
+                            continue
+
+                        # Has the clock reached the quiz slot?
+                        from environment import SLOT_TIMES
+                        start_h, end_h = SLOT_TIMES[quiz["slot_idx"]]
+
+                        if time_of_day < start_h:
+                            continue    # slot hasn't started yet
+
+                        # ── Quiz fires ──
+                        _quizzes_resolved_today.add(key)
+                        quiz["taken"] = True
+
+                        if student.is_sick:
+                            # Sick → automatic miss, mark 0
+                            quiz["missed"] = True
+                            quiz["mark"]   = 0.0
+                            course.quiz_marks.append(0.0)
+                            messages.append(f"[QUIZ] {course.name} — MISSED (sick). Mark: 0.")
+                            quiz_result_box.open(course, 0.0, missed=True)
+                        else:
+                            # Generate mark via existing Course method
+                            course.generate_quiz_mark(
+                                stress=student.stress,
+                                sleep=student.sleep / 100.0,
+                                health=student.health,
+                            )
+                            mark = course.quiz_marks[-1] if course.quiz_marks else 0.0
+                            quiz["mark"] = mark
+                            messages.append(f"[QUIZ] {course.name}: {mark:.1f}/100!")
+                            quiz_result_box.open(course, mark, missed=False)
+
+                        messages = messages[-5:]   # keep message list tidy
+                        break   # only one quiz popup at a time
+
         # Day-End Screen
         elif current_screen_state == DAY_END_SCREEN:
             # AlertBox intercepts all input while active during replay 
@@ -826,6 +1026,34 @@ while running:
                         time_of_day = week_replay_runner.time_cursor
                         if week_replay_runner.done and week_replay_runner.burnout_occurred:
                             burnout_active = True
+
+            elif quiz_week_prompt_box.active:
+                choice = quiz_week_prompt_box.handle_event(event)
+                if choice == "manual":
+                    # Stop the repeat runner and let the player play this week themselves
+                    week_replay_runner.quiz_week_pending = False
+                    week_replay_runner = None
+                    day_count += 1
+                    time_of_day = DAY_START
+                    day_over = False
+                    day_actions.clear()
+                    week_actions.clear()
+                    current_game_bg = bg_map['default']
+                    daily_outages = wifi_failure_event()
+                    todays_classes.clear()
+                    _classes_resolved.clear()
+                    _quizzes_resolved_today.clear()
+                    class_interrupt_box.attend_all = False
+                    new_diy = ((day_count - 1) % 7) + 1
+                    new_wk  = ((day_count - 1) // 7) + 1
+                    messages = [f"Week {new_wk} begins — playing manually!"]
+                    print(f"\n--- Week {new_wk} - {day_name(new_diy)} (Day {day_count}) [Manual] ---")
+                    current_screen_state = GAME_SCREEN
+                elif choice == "repeat":
+                    # Resume the runner for this quiz week
+                    week_replay_runner.quiz_week_pending = False
+                    week_replay_runner._start_new_day()
+                    messages = [f"Week {week_replay_runner.current_week} replay continues..."]
 
             elif week_repeat_box.active:
                 n = week_repeat_box.handle_event(event)
@@ -869,6 +1097,7 @@ while running:
                     # Reset class interrupt state for the new day
                     todays_classes.clear()
                     _classes_resolved.clear()
+                    _quizzes_resolved_today.clear()
                     class_interrupt_box.attend_all = False
                     # --- Semester milestone check (boundary-crossing) ---
                     if week_count < 8 and new_wk >= 8:    # crossed into post-mid → mid exam
@@ -970,6 +1199,7 @@ while running:
     if (current_screen_state == DAY_END_SCREEN
             and week_replay_runner is not None
             and not week_replay_runner.done
+            and not week_replay_runner.quiz_week_pending
             and not alert_box.active
             and not repeat_box.active
             and not week_repeat_box.active):
@@ -988,6 +1218,11 @@ while running:
             current_game_bg = bg_map['burnout']
         # Sync sick_active from student truth
         sick_active = student.is_sick
+        # If the runner just paused for a quiz-week prompt, open the dialog
+        if (week_replay_runner.quiz_week_pending
+                and not quiz_week_prompt_box.active):
+            quizzes = week_replay_runner.get_next_week_quizzes()
+            quiz_week_prompt_box.open(week_replay_runner.current_week, quizzes)
         # Check for exam milestone after week replay finishes
         if week_replay_runner.done and not week_replay_runner.burnout_occurred:
             # current_week is the last week the runner was in (7 or 15)
@@ -1025,6 +1260,7 @@ while running:
             if time_of_day > end_h:
                 # Class window is completely over — silently mark as missed
                 _classes_resolved.add(start_h)
+                cls_course.occurred_classes += 1   # it occurred; player wasn't there
                 continue
 
             if time_of_day >= start_h:
@@ -1067,6 +1303,7 @@ while running:
             bars[0].draw(screen, avg_k)
             draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
                        week_count=week_count, day_in_week=day_in_week)
+            academic_dashboard.draw(screen, course_manager, week_count)
         elif _last_game_screen == DAY_END_SCREEN:
             avg_k = course_manager.get_average_knowledge()
             day_end_screen(
@@ -1082,6 +1319,7 @@ while running:
                 week_repeat_box=week_repeat_box,
                 sick_active=sick_active,
             )
+            academic_dashboard.draw(screen, course_manager, week_count)
         save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
 
     elif current_screen_state == MAIN_MENU:
@@ -1105,6 +1343,12 @@ while running:
         alert_box.draw(screen)
         class_interrupt_box.draw(screen)
 
+        # Draw academic dashboard (behind quiz popup)
+        academic_dashboard.draw(screen, course_manager, week_count)
+
+        # Draw quiz result popup (topmost)
+        quiz_result_box.draw(screen)
+
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
         day_end_screen(
@@ -1120,7 +1364,9 @@ while running:
             week_repeat_box=week_repeat_box,
             sick_active=sick_active,
         )
-
+        academic_dashboard.draw(screen, course_manager, week_count)
+        quiz_week_prompt_box.draw(screen)
+        
     elif current_screen_state == EXAM_SCREEN:
         exam_screen(screen, exam_type, exam_continue_btn, message_font)
 
@@ -1129,7 +1375,6 @@ while running:
         semester_end_screen(screen, student, avg_k, sem_quit_btn, message_font)
 
     pygame.display.flip()
-    clock.tick(60)
 
 pygame.quit()
 sys.exit()

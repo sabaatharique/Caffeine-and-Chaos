@@ -219,6 +219,10 @@ class Student:
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
             return messages
+
+        # Always count this as an occurred class slot (whether attended or missed)
+        course.occurred_classes += 1
+
         if self.is_sick:
             messages.append(f"You're too sick to attend {course.name}. Class missed.")
             # Still counts against attendance — you really weren't there

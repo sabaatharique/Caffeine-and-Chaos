@@ -60,6 +60,8 @@ def _course_to_dict(course) -> dict:
         "lab_final": course.lab_final,
         "grade_point": course.grade_point,
         "weekly_slots": [list(s) for s in course.weekly_slots],
+        "scheduled_quizzes": course.scheduled_quizzes,
+        "occurred_classes": course.occurred_classes,
     }
 
 
@@ -86,6 +88,8 @@ def _courses_from_dict(data_list: list, course_manager):
         c.lab_final = d.get("lab_final")
         c.grade_point = d.get("grade_point", 0.0)
         c.weekly_slots = [tuple(s) for s in d.get("weekly_slots", [])]
+        c.scheduled_quizzes = d.get("scheduled_quizzes", [])
+        c.occurred_classes = d.get("occurred_classes", 0)
         course_manager.courses.append(c)
 
 
@@ -119,6 +123,7 @@ def save_game(student, course_manager,
               burnout_active, day_over,
               day_actions: list, week_actions: list,
               classes_resolved: set = None,
+              quizzes_resolved: set = None,
               attend_all_today: bool = False) -> bool:
     """
     Write all game state to SAVE_FILE.
@@ -136,6 +141,7 @@ def save_game(student, course_manager,
         "day_actions": _actions_to_serialisable(day_actions),
         "week_actions": [_actions_to_serialisable(d) for d in week_actions],
         "classes_resolved_today": list(classes_resolved) if classes_resolved else [],
+        "quizzes_resolved_today": list(quizzes_resolved) if quizzes_resolved else [],
         "attend_all_today": attend_all_today,
     }
     try:
@@ -182,6 +188,7 @@ def load_game(student, course_manager) -> dict | None:
             "day_actions": day_actions,
             "week_actions": week_actions,
             "classes_resolved_today": set(data.get("classes_resolved_today", [])),
+            "quizzes_resolved_today": set(data.get("quizzes_resolved_today", [])),
             "attend_all_today": data.get("attend_all_today", False),
         }
     except Exception as e:

@@ -1394,3 +1394,607 @@ class SetupWizard:
 
         elif self.step == 5:  # Schedule Builder
             self.schedule_builder.draw(screen)
+
+class QuizResultBox:
+    """
+    Shown immediately when a scheduled quiz fires.
+    Displays course name, the auto-generated mark, and a grade band label.
+    The player dismisses it with Enter or by clicking the card.
+    """
+
+    # ── Theme colours (match existing ui.py palette) ──
+    _CARD_BG      = (30, 30, 50, 230)
+    _BORDER       = (120, 100, 200)
+    _TEXT_WHITE   = (236, 240, 241)
+    _TEXT_SUBTEXT = (180, 180, 220)
+    _GRADE_COLORS = {          # keyed by letter grade
+        "A":  (100, 255, 140),
+        "B":  (120, 210, 255),
+        "C":  (255, 220, 80),
+        "D":  (255, 150, 60),
+        "F":  (231, 76, 60),
+    }
+
+    def __init__(self, screen_w: int, screen_h: int):
+        self.screen_w  = screen_w
+        self.screen_h  = screen_h
+        self.active    = False
+        self._course   = None
+        self._mark     = 0.0
+        self._missed   = False  # True when the quiz fired but player was sick
+        # Fonts are loaded lazily on first open (avoids pygame init order issues)
+        self._title_font  = None
+        self._body_font   = None
+        self._hint_font   = None
+
+    # ── public API ────────────────────────────────────────────────────────
+
+    def open(self, course, mark: float, missed: bool = False):
+        self._course = course
+        self._mark   = mark
+        self._missed = missed
+        self.active  = True
+        self._load_fonts()
+
+    def close(self):
+        self.active = False
+
+    def handle_event(self, event) -> bool:
+        """Return True if the box consumed the event."""
+        if not self.active:
+            return False
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_SPACE,
+                                                           pygame.K_ESCAPE):
+            self.close()
+            return True
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.close()
+            return True
+        return False
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        # ── dim the background ──
+        overlay = pygame.Surface((self.screen_w, self.screen_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+
+        # ── card ──
+        card_w, card_h = 460, 220
+        card_x = (self.screen_w - card_w) // 2
+        card_y = (self.screen_h - card_h) // 2
+
+        card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        card_surf.fill(self._CARD_BG)
+        screen.blit(card_surf, (card_x, card_y))
+        pygame.draw.rect(screen, self._BORDER, (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+        # ── accent bar at top ──
+        accent = self._grade_color() if not self._missed else (255, 80, 80)
+        pygame.draw.rect(screen, accent, (card_x, card_y, card_w, 5), border_radius=10)
+
+        y = card_y + 18
+
+        # ── title ──
+        if self._missed:
+            title_text = f"QUIZ MISSED  —  {self._course.name}"
+        else:
+            title_text = f"QUIZ RESULT  —  {self._course.name}"
+        title_surf = self._title_font.render(title_text, True, self._TEXT_WHITE)
+        screen.blit(title_surf, (card_x + card_w // 2 - title_surf.get_width() // 2, y))
+        y += title_surf.get_height() + 10
+
+        # ── divider ──
+        pygame.draw.line(screen, (80, 80, 140),
+                         (card_x + 30, y), (card_x + card_w - 30, y), 1)
+        y += 14
+
+        if self._missed:
+            # Sick message
+            sick_surf = self._body_font.render(
+                "You were sick and could not sit the quiz.", True, (255, 130, 130))
+            screen.blit(sick_surf,
+                        (card_x + card_w // 2 - sick_surf.get_width() // 2, y))
+            y += sick_surf.get_height() + 6
+            note_surf = self._hint_font.render(
+                "A mark of 0 has been recorded for this attempt.",
+                True, (200, 160, 160))
+            screen.blit(note_surf,
+                        (card_x + card_w // 2 - note_surf.get_width() // 2, y))
+        else:
+            # Mark + grade band
+            grade_letter = self._grade_letter()
+            grade_color  = self._grade_color()
+
+            mark_surf = self._title_font.render(
+                f"{self._mark:.1f} / 100", True, grade_color)
+            screen.blit(mark_surf,
+                        (card_x + card_w // 2 - mark_surf.get_width() // 2, y))
+            y += mark_surf.get_height() + 6
+
+            band_surf = self._body_font.render(
+                f"Grade Band: {grade_letter}  —  {self._band_label()}",
+                True, grade_color)
+            screen.blit(band_surf,
+                        (card_x + card_w // 2 - band_surf.get_width() // 2, y))
+
+        # ── dismiss hint ──
+        hint_surf = self._hint_font.render(
+            "Press Enter or click anywhere to continue.", True, (130, 130, 170))
+        screen.blit(hint_surf,
+                    (card_x + card_w // 2 - hint_surf.get_width() // 2,
+                     card_y + card_h - hint_surf.get_height() - 12))
+
+    # ── private helpers ───────────────────────────────────────────────────
+
+    def _load_fonts(self):
+        if self._title_font is None:
+            self._title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 26)
+            self._body_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
+            self._hint_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+
+    def _grade_letter(self) -> str:
+        m = self._mark
+        if m >= 80: return "A"
+        if m >= 70: return "B"
+        if m >= 60: return "C"
+        if m >= 50: return "D"
+        return "F"
+
+    def _grade_color(self):
+        return self._GRADE_COLORS[self._grade_letter()]
+
+    def _band_label(self) -> str:
+        m = self._mark
+        if m >= 80: return "Excellent"
+        if m >= 70: return "Good"
+        if m >= 60: return "Average"
+        if m >= 50: return "Passing"
+        return "Failing"
+
+class QuizWeekPromptBox:
+    """
+    Shown at the start of a replayed week that contains one or more quizzes.
+    Gives the player a choice:
+        [Play Manually]   – stops the week-repeat loop and returns to GAME_SCREEN.
+        [Keep Repeating]  – continues the normal fast-forward replay.
+
+    Usage:
+        box = QuizWeekPromptBox(font, small_font)
+        box.open(next_week, quiz_list)      # quiz_list = [(day_name, time_str, course_name), ...]
+        choice = box.handle_event(event)    # returns "manual" | "repeat" | None
+        box.draw(screen)
+    """
+
+    _BG      = (18, 18, 40, 250)
+    _BORDER  = (120, 90, 220)
+    _TITLE   = (200, 180, 255)
+    _BODY    = (210, 210, 235)
+    _DIM     = (130, 125, 165)
+    _BTN_MANUAL  = (50,  180, 230)    # teal – play manually
+    _BTN_REPEAT  = (100, 80, 200)     # purple – keep repeating
+
+    def __init__(self, font, small_font):
+        self.font       = font
+        self.small_font = small_font
+        self.active     = False
+        self._week      = 0
+        self._quizzes   = []          # list of (day_str, time_str, course_name)
+        self._manual_rect  = None
+        self._repeat_rect  = None
+        self._title_font   = None
+
+    def open(self, week: int, quizzes: list):
+        self.active   = True
+        self._week    = week
+        self._quizzes = quizzes
+
+    def close(self):
+        self.active = False
+
+    def handle_event(self, event) -> str | None:
+        """Return 'manual', 'repeat', or None."""
+        if not self.active:
+            return None
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN:   # Enter → play manually
+                self.active = False
+                return "manual"
+            if event.key == pygame.K_r:        # R → keep repeating
+                self.active = False
+                return "repeat"
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self._manual_rect and self._manual_rect.collidepoint(event.pos):
+                self.active = False
+                return "manual"
+            if self._repeat_rect and self._repeat_rect.collidepoint(event.pos):
+                self.active = False
+                return "repeat"
+        return None
+
+    def draw(self, screen):
+        if not self.active:
+            return
+        self._load_fonts()
+
+        W, H = screen.get_width(), screen.get_height()
+
+        # Dim overlay
+        overlay = pygame.Surface((W, H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+
+        # Card geometry
+        card_w = 500
+        row_h  = 26
+        n_rows = max(1, len(self._quizzes))
+        card_h = 200 + n_rows * row_h
+        card_x = (W - card_w) // 2
+        card_y = (H - card_h) // 2
+
+        card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        card_surf.fill(self._BG)
+        screen.blit(card_surf, (card_x, card_y))
+        pygame.draw.rect(screen, self._BORDER,
+                         (card_x, card_y, card_w, card_h), 2, border_radius=12)
+
+        # ── Title ──
+        title_surf = self._title_font.render(
+            f"  Quiz Week Ahead!  ", True, self._TITLE)
+        screen.blit(title_surf,
+                    title_surf.get_rect(centerx=card_x + card_w // 2, y=card_y + 16))
+
+        # ── Sub-heading ──
+        sub_surf = self.small_font.render(
+            f"Week {self._week} has the following quizzes scheduled:", True, self._BODY)
+        screen.blit(sub_surf,
+                    sub_surf.get_rect(centerx=card_x + card_w // 2, y=card_y + 54))
+
+        # ── Quiz list ──
+        y = card_y + 82
+        for day_str, time_str, cname in self._quizzes:
+            line = f"•  {cname}  —  {day_str}  ·  {time_str}"
+            line_surf = self.small_font.render(line, True, (220, 200, 100))
+            screen.blit(line_surf, line_surf.get_rect(centerx=card_x + card_w // 2, y=y))
+            y += row_h
+
+        # ── Separator ──
+        y += 10
+        pygame.draw.line(screen, (60, 55, 100),
+                         (card_x + 30, y), (card_x + card_w - 30, y), 1)
+        y += 10
+
+        # ── Hint ──
+        hint_surf = self.small_font.render(
+            "How do you want to handle this week?", True, self._DIM)
+        screen.blit(hint_surf,
+                    hint_surf.get_rect(centerx=card_x + card_w // 2, y=y))
+        y += 30
+
+        # ── Buttons ──
+        btn_w, btn_h = 175, 42
+        gap = 24
+        total_btn_w = btn_w * 2 + gap
+        btn_y = card_y + card_h - btn_h - 20
+
+        # [Play Manually]
+        self._manual_rect = pygame.Rect(
+            card_x + card_w // 2 - total_btn_w // 2, btn_y, btn_w, btn_h)
+        pygame.draw.rect(screen, self._BTN_MANUAL, self._manual_rect, border_radius=8)
+        pygame.draw.rect(screen, (200, 240, 255), self._manual_rect, 2, border_radius=8)
+        m_surf = self.small_font.render(" Play Manually ", True, (255, 255, 255))
+        screen.blit(m_surf, m_surf.get_rect(center=self._manual_rect.center))
+
+        # [Keep Repeating]
+        self._repeat_rect = pygame.Rect(
+            self._manual_rect.right + gap, btn_y, btn_w, btn_h)
+        pygame.draw.rect(screen, self._BTN_REPEAT, self._repeat_rect, border_radius=8)
+        pygame.draw.rect(screen, (200, 180, 255), self._repeat_rect, 2, border_radius=8)
+        r_surf = self.small_font.render(" Keep Repeating ", True, (255, 255, 255))
+        screen.blit(r_surf, r_surf.get_rect(center=self._repeat_rect.center))
+
+    def _load_fonts(self):
+        if self._title_font is None:
+            self._title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 24)
+
+
+class AcademicDashboard:
+    """
+    Modern, minimal collapsible side panel.
+
+    - Collapsed: renders a slim vertical tab on the right edge with a
+      rotated 'Course Info' label.  Clicking it expands the panel.
+    - Expanded: shows Attendance + Upcoming Quizzes sections with clean
+      typography, soft-glow progress bars, and smooth slide animation.
+      Only quizzes scheduled THIS week or NEXT week are shown.
+
+    Usage:
+        dashboard = AcademicDashboard(screen_w, screen_h, font, small_font)
+        dashboard.update(dt)                # call every frame (dt in seconds)
+        dashboard.draw(screen, course_manager, week_count)
+        dashboard.handle_event(event)       # handles click-to-expand/collapse
+    """
+
+    # ── Dimensions ──────────────────────────────────────────────────────────
+    _PANEL_W       = 280   # expanded width
+    _TAB_W         = 28    # collapsed tab width (visible strip on right edge)
+    _PANEL_H_PAD   = 0     # top padding from screen top (full height)
+    _ANIM_SPEED    = 8.0   # units/second — higher = faster slide
+
+    # ── Colours ───────────────────────────────────────────────────────────
+    _C_BG          = (14, 14, 28, 240)   # deep navy, mostly opaque
+    _C_TAB         = (26, 22, 52, 245)   # slightly lighter tab
+    _C_EDGE        = (80, 60, 160)       # subtle purple edge line
+    _C_GLOW        = (120, 90, 220)      # glow accent
+    _C_SECTION_BG  = (24, 20, 46)        # section header background (solid)
+    _C_TEXT        = (220, 215, 240)     # primary text
+    _C_DIM         = (120, 115, 150)     # secondary / dim text
+    _C_DIVIDER     = (40, 36, 72)        # divider line
+
+    # Attendance
+    _C_ATT_GOOD    = (50, 220, 120)     # ≥ 75 %
+    _C_ATT_WARN    = (240, 190, 50)     # 50-74 %
+    _C_ATT_BAD     = (220, 60, 60)      # < 50 %
+
+    # Quiz urgency
+    _C_QUIZ_THIS   = (235, 80, 80)      # this week — warm red
+    _C_QUIZ_NEXT   = (240, 190, 50)     # next week — amber
+
+    def __init__(self, screen_w: int, screen_h: int, font, small_font):
+        self.screen_w   = screen_w
+        self.screen_h   = screen_h
+        self.font       = font
+        self.small_font = small_font
+
+        self.expanded    = True          # start expanded
+        self._anim_t     = 1.0           # 0.0 = fully collapsed, 1.0 = fully expanded
+        self._fonts_loaded = False
+
+        # Font handles (loaded lazily via _ensure_fonts)
+        self._f_heading  = None   # section headers
+        self._f_body     = None   # row text
+        self._f_detail   = None   # secondary detail
+        self._f_tab      = None   # collapsed tab label
+
+    # ── public API ──────────────────────────────────────────────────────────
+
+    def update(self, dt: float):
+        """Animate the slide.  Call every frame with dt in seconds."""
+        target = 1.0 if self.expanded else 0.0
+        diff   = target - self._anim_t
+        if abs(diff) < 0.002:
+            self._anim_t = target
+        else:
+            self._anim_t += diff * self._ANIM_SPEED * dt
+            self._anim_t  = max(0.0, min(1.0, self._anim_t))
+
+    def handle_event(self, event) -> bool:
+        """Toggle expand/collapse when tab or panel header is clicked."""
+        if event.type != pygame.MOUSEBUTTONDOWN:
+            return False
+        mx, my = event.pos
+        tab_rect = self._tab_rect()
+        if tab_rect.collidepoint(mx, my):
+            self.expanded = not self.expanded
+            return True
+        return False
+
+    def draw(self, screen, course_manager, week_count: int):
+        self._ensure_fonts()
+        t = self._anim_t          # 0 = collapsed, 1 = expanded
+
+        sw, sh = self.screen_w, self.screen_h
+        panel_w = int(self._TAB_W + t * (self._PANEL_W - self._TAB_W))
+        panel_x = sw - panel_w
+
+        # ── Panel background ────────────────────────────────────────────────
+        bg_surf = pygame.Surface((panel_w, sh), pygame.SRCALPHA)
+        bg_surf.fill(self._C_BG)
+        screen.blit(bg_surf, (panel_x, 0))
+
+        # Soft left-edge glow line
+        glow_alpha = int(180 + 75 * t)
+        pygame.draw.line(screen, (*self._C_GLOW, glow_alpha),
+                         (panel_x, 0), (panel_x, sh), 2)
+
+        # ── Tab area (always visible) ────────────────────────────────────────
+        tab_rect = self._tab_rect()
+        tab_surf = pygame.Surface((self._TAB_W, sh), pygame.SRCALPHA)
+        tab_surf.fill(self._C_TAB)
+        screen.blit(tab_surf, (tab_rect.x, 0))
+
+        # Vertical "Course Info" / arrow label
+        arrow = "▶" if self.expanded else "◀"
+        tab_label = self._f_tab.render(arrow, True, self._C_GLOW)
+        arrow_y   = sh // 2 - tab_label.get_width() // 2
+        # Rotate 90° so it reads top-to-bottom
+        rotated = pygame.transform.rotate(tab_label, 90)
+        screen.blit(rotated, (tab_rect.x + self._TAB_W // 2 - rotated.get_width() // 2,
+                               sh // 2 - rotated.get_height() // 2))
+
+        # "Course Info" if collapsed enough
+        if t < 0.3:
+            ci_surf = self._f_tab.render("Course Info", True, self._C_DIM)
+            ci_rot  = pygame.transform.rotate(ci_surf, 90)
+            ci_y    = sh // 2 - ci_rot.get_height() // 2 + 30
+            screen.blit(ci_rot, (tab_rect.x + self._TAB_W // 2 - ci_rot.get_width() // 2, ci_y))
+
+        # ── Content (fades in as panel expands) ─────────────────────────────
+        content_alpha = int(max(0, (t - 0.4) / 0.6) * 255)
+        if content_alpha <= 0:
+            return
+
+        content_x = panel_x + self._TAB_W + 10
+        content_w = panel_w - self._TAB_W - 20
+        y         = 18
+
+        courses = course_manager.courses
+
+        # ════╡  ATTENDANCE  ╞════════════════════════════════════════════════
+        y = self._draw_section(screen, "ATTENDANCE", content_x, content_w, y,
+                               content_alpha)
+
+        if not courses:
+            y = self._draw_dim_line(screen, "No courses enrolled.",
+                                    content_x, y, content_alpha)
+        else:
+            for course in courses:
+                pct = course.get_attendance_percentage()
+                att_color = (
+                    self._C_ATT_GOOD if pct >= 75 else
+                    self._C_ATT_WARN if pct >= 50 else
+                    self._C_ATT_BAD
+                )
+                if y + 46 > sh - 20:
+                    break
+
+                # Course name
+                name_surf = self._f_body.render(
+                    self._truncate(course.name, 20), True,
+                    self._alpha_color(self._C_TEXT, content_alpha))
+                screen.blit(name_surf, (content_x, y))
+
+                # Percentage and counts right-aligned
+                count_text = f"{course.attended_classes}/{course.occurred_classes or course.total_classes}"
+                pct_text = f"({pct:.0f}%)"
+                full_text = f"{count_text} {pct_text}"
+                
+                pct_surf = self._f_body.render(
+                    full_text, True,
+                    self._alpha_color(att_color, content_alpha))
+                screen.blit(pct_surf,
+                            (content_x + content_w - pct_surf.get_width(), y))
+
+                y += name_surf.get_height() + 4
+
+                # Progress bar (background)
+                bar_h = 5
+                bar_bg_surf = pygame.Surface((content_w, bar_h), pygame.SRCALPHA)
+                bar_bg_surf.fill((40, 36, 72, content_alpha))
+                screen.blit(bar_bg_surf, (content_x, y))
+
+                # Progress fill with soft glow
+                fill_w = int(content_w * min(pct, 100) / 100)
+                if fill_w > 0:
+                    fill_surf = pygame.Surface((fill_w, bar_h), pygame.SRCALPHA)
+                    fill_surf.fill((*att_color, content_alpha))
+                    screen.blit(fill_surf, (content_x, y))
+
+                    # Tiny glow cap at the right end of the bar
+                    glow_cap = pygame.Surface((8, bar_h + 4), pygame.SRCALPHA)
+                    cap_alpha = min(content_alpha, 180)
+                    glow_cap.fill((*att_color, cap_alpha))
+                    screen.blit(glow_cap, (content_x + fill_w - 4, y - 2))
+
+                y += bar_h + 14
+
+        # Divider
+        y += 4
+        divider_surf = pygame.Surface((content_w, 1), pygame.SRCALPHA)
+        divider_surf.fill((*self._C_DIVIDER, content_alpha))
+        screen.blit(divider_surf, (content_x, y))
+        y += 12
+
+        # ════╡  UPCOMING QUIZZES  ╞══════════════════════════════════════════
+        y = self._draw_section(screen, "UPCOMING QUIZZES", content_x, content_w, y,
+                               content_alpha)
+
+        # Collect only this week + next week
+        upcoming = []
+        for course in courses:
+            if course.course_type != "Theory":
+                continue
+            for quiz in course.scheduled_quizzes:
+                if quiz["taken"]:
+                    continue
+                weeks_away = quiz["week"] - week_count
+                if weeks_away in (0, 1):   # this week or next week only
+                    upcoming.append((quiz["week"], quiz["day_idx"],
+                                     quiz["slot_idx"], course.name, weeks_away))
+        upcoming.sort()
+
+        if not upcoming:
+            y = self._draw_dim_line(screen, "No quizzes this or next week.",
+                                    content_x, y, content_alpha)
+        else:
+            from environment import SLOT_TIMES, DAYS_OF_WEEK, format_time
+            for (wk, d_idx, s_idx, cname, weeks_away) in upcoming:
+                if y + 52 > sh - 12:
+                    break
+
+                quiz_color = self._C_QUIZ_THIS if weeks_away == 0 else self._C_QUIZ_NEXT
+                badge_text = "THIS WEEK" if weeks_away == 0 else "NEXT WEEK"
+
+                day_short  = DAYS_OF_WEEK[d_idx][:3]
+                start_h, _ = SLOT_TIMES[s_idx]
+                time_str   = format_time(start_h)
+
+                # Badge pill
+                badge_surf = self._f_detail.render(badge_text, True,
+                                                    self._alpha_color(quiz_color, content_alpha))
+                screen.blit(badge_surf, (content_x, y))
+                y += badge_surf.get_height() + 3
+
+                # Course name
+                cname_surf = self._f_body.render(
+                    self._truncate(cname, 22), True,
+                    self._alpha_color(self._C_TEXT, content_alpha))
+                screen.blit(cname_surf, (content_x, y))
+                y += cname_surf.get_height() + 2
+
+                # Day + time
+                when_surf = self._f_detail.render(
+                    f"{day_short}  ·  {time_str}", True,
+                    self._alpha_color(self._C_DIM, content_alpha))
+                screen.blit(when_surf, (content_x, y))
+                y += when_surf.get_height() + 12
+
+                # Thin separator between quiz cards
+                sep_surf = pygame.Surface((content_w, 1), pygame.SRCALPHA)
+                sep_surf.fill((*self._C_DIVIDER, content_alpha // 2))
+                screen.blit(sep_surf, (content_x, y - 4))
+
+    # ── private helpers ─────────────────────────────────────────────────────
+
+    def _tab_rect(self) -> pygame.Rect:
+        return pygame.Rect(self.screen_w - self._TAB_W, 0,
+                           self._TAB_W, self.screen_h)
+
+    def _ensure_fonts(self):
+        if self._fonts_loaded:
+            return
+        self._f_heading = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
+        self._f_body    = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
+        self._f_detail  = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
+        self._f_tab     = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+        self._fonts_loaded = True
+
+    def _draw_section(self, screen, title: str,
+                      x: int, w: int, y: int, alpha: int) -> int:
+        """Draw a clean section label. Returns new y."""
+        lbl_surf = self._f_heading.render(title, True,
+                                           self._alpha_color(self._C_GLOW, alpha))
+        screen.blit(lbl_surf, (x, y))
+        y += lbl_surf.get_height() + 2
+        # Thin underline
+        line_surf = pygame.Surface((w, 1), pygame.SRCALPHA)
+        line_surf.fill((*self._C_GLOW, alpha // 3))
+        screen.blit(line_surf, (x, y))
+        return y + 10
+
+    def _draw_dim_line(self, screen, text: str, x: int, y: int, alpha: int) -> int:
+        surf = self._f_detail.render(text, True,
+                                      self._alpha_color(self._C_DIM, alpha))
+        screen.blit(surf, (x, y))
+        return y + surf.get_height() + 8
+
+    @staticmethod
+    def _alpha_color(rgb, alpha: int):
+        """Clamp alpha and return a 3-tuple (SRCALPHA surfaces handle alpha separately)."""
+        return (rgb[0], rgb[1], rgb[2])   # pygame.font.render uses solid colour; opacity is via Surface alpha
+
+    @staticmethod
+    def _truncate(s: str, max_chars: int) -> str:
+        return s if len(s) <= max_chars else s[:max_chars - 1] + "…"

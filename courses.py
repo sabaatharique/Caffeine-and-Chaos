@@ -13,9 +13,13 @@ class Course:
         # Attendance
         self.total_classes = total_classes
         self.attended_classes = 0
+        self.occurred_classes = 0   # classes that have actually fired (attended OR missed)
 
         # Weekly timetable: list of (day_idx, slot_idx) tuples (0=Monday … 4=Friday)
         self.weekly_slots: list[tuple[int, int]] = []
+
+        # Quizzes
+        self.scheduled_quizzes: list[dict] = []
 
         # Theory
         self.quiz_marks = []
@@ -42,9 +46,13 @@ class Course:
 
 
     def get_attendance_percentage(self):
-        if self.total_classes == 0:
-            return 0
-        return (self.attended_classes / self.total_classes) * 100  
+        """Return attendance as a percentage of classes that have actually occurred.
+        Falls back to total_classes when no classes have been recorded yet.
+        """
+        denom = self.occurred_classes if self.occurred_classes > 0 else self.total_classes
+        if denom == 0:
+            return 0.0
+        return min((self.attended_classes / denom) * 100, 100.0)
     
     # THEORY SECTION 
     def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
@@ -283,3 +291,67 @@ class CourseManager:
         # Sort slots for each course for consistent display
         for c in self.courses:
             c.weekly_slots.sort()
+
+    # ── Quiz scheduling ────────────────────────────────────────────────────────
+
+    # Weighted probability per week for each quiz window.
+    # Index 0 = first week of the window.
+    _PRE_MID_WEIGHTS  = [1, 1, 2, 4, 5, 5, 4]   # weeks 1-7
+    _POST_MID_WEIGHTS = [1, 1, 2, 4, 5, 5, 4, 3] # weeks 8-15
+
+    def schedule_all_quizzes(self):
+        """
+        Assign 2 pre-midterm + 2 post-midterm quiz dates to every theory course.
+        Call this ONCE after apply_schedule() so that weekly_slots are populated.
+
+        Each quiz lands on one of the course's own class slots so it fires
+        exactly when the player would normally be in lecture.
+        """
+        import random
+
+        for course in self.courses:
+            if course.course_type != "Theory":
+                continue
+            if not course.weekly_slots:
+                continue  # shouldn't happen, but be safe
+
+            course.scheduled_quizzes = []
+            used: set[tuple[int, int]] = set()  # (week, day_idx) → no double-booking
+
+            def _pick(week_pool: list[int], weights: list[int]) -> dict | None:
+                """
+                Attempt up to 30 times to find a unique (week, day_idx) slot.
+                Returns a quiz dict or None if every attempt collides.
+                """
+                for _ in range(30):
+                    week = random.choices(week_pool, weights=weights[:len(week_pool)], k=1)[0]
+                    day_idx, slot_idx = random.choice(course.weekly_slots)
+                    key = (week, day_idx)
+                    if key not in used:
+                        used.add(key)
+                        return {
+                            "week":     week,
+                            "day_idx":  day_idx,
+                            "slot_idx": slot_idx,
+                            "taken":    False,
+                            "missed":   False,
+                            "mark":     None,   # filled later when grade-entry is added
+                        }
+                return None  # extremely unlikely
+
+            # 2 quizzes before mid (weeks 1-7)
+            pre_weeks = list(range(1, 8))
+            for _ in range(2):
+                q = _pick(pre_weeks, self._PRE_MID_WEIGHTS)
+                if q:
+                    course.scheduled_quizzes.append(q)
+
+            # 2 quizzes after mid (weeks 8-15)
+            post_weeks = list(range(8, 16))
+            for _ in range(2):
+                q = _pick(post_weeks, self._POST_MID_WEIGHTS)
+                if q:
+                    course.scheduled_quizzes.append(q)
+
+            # Sort chronologically for the dashboard
+            course.scheduled_quizzes.sort(key=lambda q: (q["week"], q["day_idx"]))
