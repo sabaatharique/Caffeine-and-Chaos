@@ -1630,7 +1630,7 @@ class QuizWeekPromptBox:
         y = card_y + 82
         for q in self._quizzes:
             # q is a dict with {day, time, course_name, quiz_number}
-            line = f"• Quiz {q['quiz_number']} — {q['course_name']}  ({q['day']} at {q['time']})"
+            line = f"> Quiz {q['quiz_number']} : {q['course_name']}  ({q['day']} at {q['time']})"
             line_surf = self.small_font.render(line, True, (220, 200, 100))
             screen.blit(line_surf, line_surf.get_rect(centerx=card_x + card_w // 2, y=y))
             y += row_h
