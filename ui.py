@@ -1796,7 +1796,7 @@ class AcademicDashboard:
             ci_y    = sh // 2 - ci_rot.get_height() // 2 + 30
             screen.blit(ci_rot, (tab_rect.x + self._TAB_W // 2 - ci_rot.get_width() // 2, ci_y))
 
-        # ── Content (fades in as panel expands) ─────────────────────────────
+        # ── Content (fades in as panel expands) 
         content_alpha = int(max(0, (t - 0.4) / 0.6) * 255)
         if content_alpha <= 0:
             return

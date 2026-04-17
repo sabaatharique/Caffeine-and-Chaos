@@ -316,15 +316,21 @@ class CourseManager:
         # Clear existing slots
         for c in self.courses:
             c.weekly_slots = []
-        # Assign new slots
+        # Assign new slots and recalculate targets
         for (day_idx, slot_idx), course in schedule.items():
             if course in self.courses:
                 course.weekly_slots.append((day_idx, slot_idx))
-        # Sort slots for each course for consistent display
+        
+        # Recalculate total_classes based on assigned slots
         for c in self.courses:
             c.weekly_slots.sort()
+            multiplier = 16 if c.schedule == "weekly" else 8
+            c.total_classes = len(c.weekly_slots) * multiplier
+            # Sync lab evaluation targets for lab courses
+            if c.course_type == "Lab":
+                c.max_lab_evaluations = c.total_classes
 
-    # ── Quiz scheduling ────────────────────────────────────────────────────────
+    # ── Quiz scheduling 
 
     # Weighted probability per week for each quiz window.
     # Index 0 = first week of the window.
