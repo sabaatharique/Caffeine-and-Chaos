@@ -1781,11 +1781,11 @@ class AcademicDashboard:
         screen.blit(tab_surf, (tab_rect.x, 0))
 
         # Vertical "Course Info" / arrow label
-        arrow = "▶" if self.expanded else "◀"
+        arrow = ">" if self.expanded else "<"
         tab_label = self._f_tab.render(arrow, True, self._C_GLOW)
         arrow_y   = sh // 2 - tab_label.get_width() // 2
         # Rotate 90° so it reads top-to-bottom
-        rotated = pygame.transform.rotate(tab_label, 90)
+        rotated = pygame.transform.rotate(tab_label, 0)
         screen.blit(rotated, (tab_rect.x + self._TAB_W // 2 - rotated.get_width() // 2,
                                sh // 2 - rotated.get_height() // 2))
 
@@ -1893,8 +1893,8 @@ class AcademicDashboard:
                 time_str  = format_time(SLOT_TIMES[q["slot_idx"]][0])
 
                 # Row: Quiz N — Course
-                label = f"Quiz {q['quiz_number']} — {self._truncate(q['course_name'], 18)}"
-                subtitle = f"{day_short} @ {time_str}  —  {badge_text}"
+                label = f"Quiz {q['quiz_number']} : {self._truncate(q['course_name'], 18)}"
+                subtitle = f"{day_short} @ {time_str} :  {badge_text}"
                 y = self._draw_complex_line(screen, label, subtitle, content_x, y, content_alpha, quiz_color)
 
         # ── QUIZ HISTORY ──
@@ -1910,7 +1910,7 @@ class AcademicDashboard:
                 status = "MISSED" if q["missed"] else "TAKEN"
                 st_color = (255, 120, 120) if q["missed"] else (120, 255, 180)
                 
-                line_text = f"Quiz {q['quiz_number']} — {self._truncate(q['course_name'], 15)}"
+                line_text = f"Quiz {q['quiz_number']} : {self._truncate(q['course_name'], 15)}"
                 y = self._draw_complex_line(screen, line_text, status, content_x, y, content_alpha, st_color)
 
     # ── private helpers ─────────────────────────────────────────────────────

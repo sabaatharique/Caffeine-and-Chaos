@@ -193,8 +193,8 @@ def load_game(student, course_manager) -> dict | None:
             "day_over": data.get("day_over", False),
             "day_actions": day_actions,
             "week_actions": week_actions,
-            "classes_resolved_today": {tuple(x) for x in data.get("classes_resolved_today", [])},
-            "quizzes_resolved_today": {tuple(x) for x in data.get("quizzes_resolved_today", [])},
+            "classes_resolved_today": set(data.get("classes_resolved_today", [])),
+            "quizzes_resolved_today": {tuple(x) for x in data.get("quizzes_resolved_today", []) if isinstance(x, (list, tuple))},
             "attend_all_today": data.get("attend_all_today", False),
         }
     except Exception as e:
