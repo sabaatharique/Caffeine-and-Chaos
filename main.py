@@ -1113,13 +1113,14 @@ while running:
                     if day_actions:
                         # Cap repeats based on week/day-of-week to enforce game flow
                         SEMESTER_LAST_DAY = 7 * 15  # day 105 = end of week 15
-                        if week_count in (1, 8):  # first week of each phase
-                            if day_in_week <= 5:      # weekday: fill remaining week
-                                max_rep = 5 - day_in_week
-                            else:                     # Saturday: copy onto Sunday only
-                                max_rep = 1
-                        else:                      # last week or standard week
-                            max_rep = min(30, SEMESTER_LAST_DAY - day_count)
+                        # Unified capping logic for all weeks:
+                        # Weekdays (1-5) can repeat up to Friday; Saturday (6) can repeat into Sunday; Sunday (7) zero.
+                        if day_in_week <= 5:
+                            max_rep = 5 - day_in_week
+                        elif day_in_week == 6:
+                            max_rep = 1
+                        else:
+                            max_rep = 0
                         if max_rep > 0:
                             repeat_box.open("Repeat for how many more days?", max_value=max_rep)
                         else:
