@@ -222,19 +222,11 @@ class ReplayRunner:
                 
                 start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
                 if action_start <= start_h < action_end or self.time_cursor >= start_h:
+                    # Mark as taken (or missed if sick) — no mark generated yet
                     quiz["taken"] = True
                     if self.student.is_sick:
                         quiz["missed"] = True
-                        quiz["mark"]   = 0.0
-                        c.quiz_marks.append(0.0)
-                    else:
-                        c.generate_quiz_mark(
-                            stress=self.student.stress,
-                            sleep=self.student.sleep / 100.0,
-                            health=self.student.health,
-                        )
-                        if c.quiz_marks:
-                            quiz["mark"] = c.quiz_marks[-1]
+                    # quiz["mark"] stays None — Phase 2 result system fills this in
 
         self.time_cursor    = action_end
         self.action_idx    += 1
@@ -284,6 +276,10 @@ class WeekReplayRunner:
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
 
+        # Rewind quiz taken/missed flags for every week we're about to fast-forward
+        for w in range(start_week + 1, start_week + n_weeks + 1):
+            self.course_manager.reset_quizzes_for_week(w)
+
         self._start_new_day()
 
     #  helpers
@@ -299,14 +295,16 @@ class WeekReplayRunner:
         self.weeks_done   += 1
         self.day_in_week   = 0
         self.current_week += 1
+        # Rewind quizzes for the week we're about to replay
+        self.course_manager.reset_quizzes_for_week(self.current_week)
 
     @property
     def current_day_in_week(self):
         """1-based day index within the replaying week."""
         return self.day_in_week + 1
 
-    def get_next_week_quizzes(self) -> list:
-        """Return (day_str, time_str, course_name) for untaken quizzes in current_week."""
+    def get_next_week_quizzes(self) -> list[dict]:
+        """Return enriched quiz dicts for untaken quizzes in current_week."""
         from environment import SLOT_TIMES, DAYS_OF_WEEK, format_time
         result = []
         for course in self.course_manager.courses:
@@ -318,8 +316,12 @@ class WeekReplayRunner:
                 if quiz["week"] == self.current_week:
                     day_str  = DAYS_OF_WEEK[quiz["day_idx"]]
                     start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
-                    time_str = format_time(start_h)
-                    result.append((day_str, time_str, course.name))
+                    result.append({
+                        "day":         day_str,
+                        "time":        format_time(start_h),
+                        "course_name": course.name,
+                        "quiz_number": quiz["quiz_number"],
+                    })
         return result
 
     # tick
@@ -472,19 +474,11 @@ class WeekReplayRunner:
                 
                 start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
                 if action_start <= start_h < action_end or self.time_cursor >= start_h:
+                    # Mark as taken (or missed if sick) — no mark generated yet
                     quiz["taken"] = True
                     if self.student.is_sick:
                         quiz["missed"] = True
-                        quiz["mark"]   = 0.0
-                        c.quiz_marks.append(0.0)
-                    else:
-                        c.generate_quiz_mark(
-                            stress=self.student.stress,
-                            sleep=self.student.sleep / 100.0,
-                            health=self.student.health,
-                        )
-                        if c.quiz_marks:
-                            quiz["mark"] = c.quiz_marks[-1]
+                    # quiz["mark"] stays None — Phase 2 result system fills this in
 
         self.time_cursor  = action_end
         self.action_idx  += 1
@@ -956,7 +950,7 @@ while running:
                         if quiz["taken"]:
                             continue
 
-                        key = (course.name, quiz["week"], quiz["day_idx"])
+                        key = (course.name, quiz["quiz_number"])
                         if key in _quizzes_resolved_today:
                             continue
 
@@ -978,23 +972,14 @@ while running:
                         quiz["taken"] = True
 
                         if student.is_sick:
-                            # Sick → automatic miss, mark 0
                             quiz["missed"] = True
-                            quiz["mark"]   = 0.0
-                            course.quiz_marks.append(0.0)
-                            messages.append(f"[QUIZ] {course.name} — MISSED (sick). Mark: 0.")
-                            quiz_result_box.open(course, 0.0, missed=True)
+                            # mark stays None — result system will handle this in Phase 2
+                            messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} MISSED (sick).")
+                            quiz_result_box.open(course, missed=True, quiz_number=quiz["quiz_number"])
                         else:
-                            # Generate mark via existing Course method
-                            course.generate_quiz_mark(
-                                stress=student.stress,
-                                sleep=student.sleep / 100.0,
-                                health=student.health,
-                            )
-                            mark = course.quiz_marks[-1] if course.quiz_marks else 0.0
-                            quiz["mark"] = mark
-                            messages.append(f"[QUIZ] {course.name}: {mark:.1f}/100!")
-                            quiz_result_box.open(course, mark, missed=False)
+                            # mark stays None — result system will handle this in Phase 2
+                            messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken.")
+                            quiz_result_box.open(course, missed=False, quiz_number=quiz["quiz_number"])
 
                         messages = messages[-5:]   # keep message list tidy
                         break   # only one quiz popup at a time
@@ -1070,6 +1055,9 @@ while running:
             elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
+                    # Rewind quizzes for this week so the day-repeat can re-trigger them
+                    _replay_week = ((day_count - 1) // 7) + 1
+                    course_manager.reset_quizzes_for_week(_replay_week)
                     replay_runner = ReplayRunner(student, course_manager, day_actions, n, day_count)
                     messages = []
 

@@ -1429,10 +1429,10 @@ class QuizResultBox:
 
     # ── public API ────────────────────────────────────────────────────────
 
-    def open(self, course, mark: float, missed: bool = False):
+    def open(self, course, missed: bool = False, quiz_number: int = 1):
         self._course = course
-        self._mark   = mark
         self._missed = missed
+        self._quiz_number = quiz_number
         self.active  = True
         self._load_fonts()
 
@@ -1462,70 +1462,44 @@ class QuizResultBox:
         screen.blit(overlay, (0, 0))
 
         # ── card ──
-        card_w, card_h = 460, 220
+        card_w, card_h = 420, 200
         card_x = (self.screen_w - card_w) // 2
         card_y = (self.screen_h - card_h) // 2
 
         card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
         card_surf.fill(self._CARD_BG)
         screen.blit(card_surf, (card_x, card_y))
-        pygame.draw.rect(screen, self._BORDER, (card_x, card_y, card_w, card_h), 2, border_radius=10)
+        pygame.draw.rect(screen, (100, 100, 180), (card_x, card_y, card_w, card_h), 2, border_radius=10)
 
-        # ── accent bar at top ──
-        accent = self._grade_color() if not self._missed else (255, 80, 80)
-        pygame.draw.rect(screen, accent, (card_x, card_y, card_w, 5), border_radius=10)
-
-        y = card_y + 18
-
-        # ── title ──
-        if self._missed:
-            title_text = f"QUIZ MISSED  —  {self._course.name}"
-        else:
-            title_text = f"QUIZ RESULT  —  {self._course.name}"
+        # ── Title ──
+        title_text = f"Quiz {self._quiz_number} — {self._course.name}"
         title_surf = self._title_font.render(title_text, True, self._TEXT_WHITE)
-        screen.blit(title_surf, (card_x + card_w // 2 - title_surf.get_width() // 2, y))
-        y += title_surf.get_height() + 10
+        screen.blit(title_surf, (card_x + card_w // 2 - title_surf.get_width() // 2, card_y + 20))
 
-        # ── divider ──
-        pygame.draw.line(screen, (80, 80, 140),
-                         (card_x + 30, y), (card_x + card_w - 30, y), 1)
-        y += 14
+        pygame.draw.line(screen, (80, 80, 140), (card_x + 40, card_y + 60), (card_x + card_w - 40, card_y + 60), 1)
 
+        # ── Status ──
         if self._missed:
-            # Sick message
-            sick_surf = self._body_font.render(
-                "You were sick and could not sit the quiz.", True, (255, 130, 130))
-            screen.blit(sick_surf,
-                        (card_x + card_w // 2 - sick_surf.get_width() // 2, y))
-            y += sick_surf.get_height() + 6
-            note_surf = self._hint_font.render(
-                "A mark of 0 has been recorded for this attempt.",
-                True, (200, 160, 160))
-            screen.blit(note_surf,
-                        (card_x + card_w // 2 - note_surf.get_width() // 2, y))
+            status_text = "✗ Missed (sick or skipped)"
+            status_color = (255, 100, 100)
         else:
-            # Mark + grade band
-            grade_letter = self._grade_letter()
-            grade_color  = self._grade_color()
+            status_text = "✓ Quiz Taken"
+            status_color = (180, 255, 180)
+        
+        status_surf = self._body_font.render(status_text, True, status_color)
+        screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
 
-            mark_surf = self._title_font.render(
-                f"{self._mark:.1f} / 100", True, grade_color)
-            screen.blit(mark_surf,
-                        (card_x + card_w // 2 - mark_surf.get_width() // 2, y))
-            y += mark_surf.get_height() + 6
-
-            band_surf = self._body_font.render(
-                f"Grade Band: {grade_letter}  —  {self._band_label()}",
-                True, grade_color)
-            screen.blit(band_surf,
-                        (card_x + card_w // 2 - band_surf.get_width() // 2, y))
+        # ── Note ──
+        note_text = "Results will be announced later."
+        note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
+        screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
 
         # ── dismiss hint ──
         hint_surf = self._hint_font.render(
-            "Press Enter or click anywhere to continue.", True, (130, 130, 170))
+            "[ Enter to continue ]", True, (130, 130, 170))
         screen.blit(hint_surf,
                     (card_x + card_w // 2 - hint_surf.get_width() // 2,
-                     card_y + card_h - hint_surf.get_height() - 12))
+                     card_y + card_h - 30))
 
     # ── private helpers ───────────────────────────────────────────────────
 
@@ -1654,8 +1628,9 @@ class QuizWeekPromptBox:
 
         # ── Quiz list ──
         y = card_y + 82
-        for day_str, time_str, cname in self._quizzes:
-            line = f"•  {cname}  —  {day_str}  ·  {time_str}"
+        for q in self._quizzes:
+            # q is a dict with {day, time, course_name, quiz_number}
+            line = f"• Quiz {q['quiz_number']} — {q['course_name']}  ({q['day']} at {q['time']})"
             line_surf = self.small_font.render(line, True, (220, 200, 100))
             screen.blit(line_surf, line_surf.get_rect(centerx=card_x + card_w // 2, y=y))
             y += row_h
@@ -1902,59 +1877,41 @@ class AcademicDashboard:
                                content_alpha)
 
         # Collect only this week + next week
-        upcoming = []
-        for course in courses:
-            if course.course_type != "Theory":
-                continue
-            for quiz in course.scheduled_quizzes:
-                if quiz["taken"]:
-                    continue
-                weeks_away = quiz["week"] - week_count
-                if weeks_away in (0, 1):   # this week or next week only
-                    upcoming.append((quiz["week"], quiz["day_idx"],
-                                     quiz["slot_idx"], course.name, weeks_away))
-        upcoming.sort()
+        upcoming = self._get_upcoming_quizzes(course_manager, week_count)
 
         if not upcoming:
-            y = self._draw_dim_line(screen, "No quizzes this or next week.",
-                                    content_x, y, content_alpha)
+            y = self._draw_dim_line(screen, "No quizzes soon.", content_x, y, content_alpha)
         else:
             from environment import SLOT_TIMES, DAYS_OF_WEEK, format_time
-            for (wk, d_idx, s_idx, cname, weeks_away) in upcoming:
-                if y + 52 > sh - 12:
-                    break
-
+            for q in upcoming:
+                if y + 60 > sh - 10: break
+                weeks_away = q["week"] - week_count
                 quiz_color = self._C_QUIZ_THIS if weeks_away == 0 else self._C_QUIZ_NEXT
                 badge_text = "THIS WEEK" if weeks_away == 0 else "NEXT WEEK"
+                
+                day_short = DAYS_OF_WEEK[q["day_idx"]][:3]
+                time_str  = format_time(SLOT_TIMES[q["slot_idx"]][0])
 
-                day_short  = DAYS_OF_WEEK[d_idx][:3]
-                start_h, _ = SLOT_TIMES[s_idx]
-                time_str   = format_time(start_h)
+                # Row: Quiz N — Course
+                label = f"Quiz {q['quiz_number']} — {self._truncate(q['course_name'], 18)}"
+                subtitle = f"{day_short} @ {time_str}  —  {badge_text}"
+                y = self._draw_complex_line(screen, label, subtitle, content_x, y, content_alpha, quiz_color)
 
-                # Badge pill
-                badge_surf = self._f_detail.render(badge_text, True,
-                                                    self._alpha_color(quiz_color, content_alpha))
-                screen.blit(badge_surf, (content_x, y))
-                y += badge_surf.get_height() + 3
-
-                # Course name
-                cname_surf = self._f_body.render(
-                    self._truncate(cname, 22), True,
-                    self._alpha_color(self._C_TEXT, content_alpha))
-                screen.blit(cname_surf, (content_x, y))
-                y += cname_surf.get_height() + 2
-
-                # Day + time
-                when_surf = self._f_detail.render(
-                    f"{day_short}  ·  {time_str}", True,
-                    self._alpha_color(self._C_DIM, content_alpha))
-                screen.blit(when_surf, (content_x, y))
-                y += when_surf.get_height() + 12
-
-                # Thin separator between quiz cards
-                sep_surf = pygame.Surface((content_w, 1), pygame.SRCALPHA)
-                sep_surf.fill((*self._C_DIVIDER, content_alpha // 2))
-                screen.blit(sep_surf, (content_x, y - 4))
+        # ── QUIZ HISTORY ──
+        y += 10
+        y = self._draw_section(screen, "QUIZ HISTORY", content_x, content_w, y, content_alpha)
+        
+        history = self._get_quiz_history(course_manager)
+        if not history:
+            y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
+        else:
+            for q in history:
+                if y + 42 > sh - 10: break
+                status = "MISSED" if q["missed"] else "TAKEN"
+                st_color = (255, 120, 120) if q["missed"] else (120, 255, 180)
+                
+                line_text = f"Quiz {q['quiz_number']} — {self._truncate(q['course_name'], 15)}"
+                y = self._draw_complex_line(screen, line_text, status, content_x, y, content_alpha, st_color)
 
     # ── private helpers ─────────────────────────────────────────────────────
 
@@ -1998,3 +1955,40 @@ class AcademicDashboard:
     @staticmethod
     def _truncate(s: str, max_chars: int) -> str:
         return s if len(s) <= max_chars else s[:max_chars - 1] + "…"
+
+    def _draw_complex_line(self, screen, title: str, subtitle: str,
+                           x: int, y: int, alpha: int, accent_color: tuple) -> int:
+        """Draw a two-line row (Title / Subtitle) with an accent."""
+        title_surf = self._f_body.render(title, True, self._alpha_color(self._C_TEXT, alpha))
+        screen.blit(title_surf, (x, y))
+        y += title_surf.get_height()
+        
+        sub_surf = self._f_detail.render(subtitle, True, self._alpha_color(accent_color, alpha))
+        screen.blit(sub_surf, (x, y))
+        return y + sub_surf.get_height() + 8
+
+    def _get_upcoming_quizzes(self, course_manager, week_count: int) -> list[dict]:
+        """Fetch quizzes for this week and next week."""
+        res = []
+        for course in course_manager.courses:
+            if course.course_type != "Theory": continue
+            for q in course.scheduled_quizzes:
+                if q["taken"]: continue
+                weeks_away = q["week"] - week_count
+                if 0 <= weeks_away <= 1:
+                    res.append({**q, "course_name": course.name})
+        # Sort chronologically
+        res.sort(key=lambda x: (x["week"], x["day_idx"], x["slot_idx"]))
+        return res
+
+    def _get_quiz_history(self, course_manager) -> list[dict]:
+        """Fetch all quizzes that have already been taken or missed."""
+        res = []
+        for course in course_manager.courses:
+            if course.course_type != "Theory": continue
+            for q in course.scheduled_quizzes:
+                if q["taken"]:
+                    res.append({**q, "course_name": course.name})
+        # Sort by week (descending) then quiz number
+        res.sort(key=lambda x: (x["week"], x["quiz_number"]), reverse=True)
+        return res

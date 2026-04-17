@@ -52,7 +52,6 @@ def _course_to_dict(course) -> dict:
         "total_classes": course.total_classes,
         "attended_classes": course.attended_classes,
         "max_lab_evaluations": course.max_lab_evaluations,
-        "quiz_marks": course.quiz_marks,
         "mid_mark": course.mid_mark,
         "final_mark": course.final_mark,
         "lab_evaluations": course.lab_evaluations,
@@ -80,7 +79,6 @@ def _courses_from_dict(data_list: list, course_manager):
         )
         c.knowledge = d.get("knowledge", 10)
         c.attended_classes = d.get("attended_classes", 0)
-        c.quiz_marks = d.get("quiz_marks", [])
         c.mid_mark = d.get("mid_mark")
         c.final_mark = d.get("final_mark")
         c.lab_evaluations = d.get("lab_evaluations", [])
@@ -89,6 +87,14 @@ def _courses_from_dict(data_list: list, course_manager):
         c.grade_point = d.get("grade_point", 0.0)
         c.weekly_slots = [tuple(s) for s in d.get("weekly_slots", [])]
         c.scheduled_quizzes = d.get("scheduled_quizzes", [])
+        # Migration guard for older saves
+        for i, q in enumerate(c.scheduled_quizzes):
+            if "quiz_number" not in q:
+                q["quiz_number"] = i + 1
+            if "attempt" not in q:
+                q["attempt"] = 0
+            if "mark" not in q:
+                q["mark"] = None
         c.occurred_classes = d.get("occurred_classes", 0)
         course_manager.courses.append(c)
 
@@ -187,8 +193,8 @@ def load_game(student, course_manager) -> dict | None:
             "day_over": data.get("day_over", False),
             "day_actions": day_actions,
             "week_actions": week_actions,
-            "classes_resolved_today": set(data.get("classes_resolved_today", [])),
-            "quizzes_resolved_today": set(data.get("quizzes_resolved_today", [])),
+            "classes_resolved_today": {tuple(x) for x in data.get("classes_resolved_today", [])},
+            "quizzes_resolved_today": {tuple(x) for x in data.get("quizzes_resolved_today", [])},
             "attend_all_today": data.get("attend_all_today", False),
         }
     except Exception as e:

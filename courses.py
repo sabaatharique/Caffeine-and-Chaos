@@ -22,7 +22,6 @@ class Course:
         self.scheduled_quizzes: list[dict] = []
 
         # Theory
-        self.quiz_marks = []
         self.mid_mark = None
         self.final_mark = None
 
@@ -54,6 +53,34 @@ class Course:
             return 0.0
         return min((self.attended_classes / denom) * 100, 100.0)
     
+    @property
+    def quiz_marks(self) -> list[float]:
+        """
+        Derive quiz marks from scheduled_quizzes.
+        Returns only quizzes where mark is not None (i.e., result system has run).
+        Ordered by quiz_number so calculate_total_marks() gets them in the right order.
+        Phase 1: always returns [] because mark stays None.
+        Phase 2: returns real values once the result system populates quiz["mark"].
+        """
+        return [
+            q["mark"]
+            for q in sorted(self.scheduled_quizzes, key=lambda q: q["quiz_number"])
+            if q["taken"] and not q["missed"] and q["mark"] is not None
+        ]
+
+    def reset_for_week_repeat(self, week: int) -> None:
+        """
+        Rewind quiz state for all quizzes scheduled in `week`.
+        Called before a week is replayed so the player can re-encounter the quiz prompts.
+        Mark is also cleared so Phase 2 can regenerate it cleanly on re-attempt.
+        """
+        for q in self.scheduled_quizzes:
+            if q["week"] == week:
+                q["taken"]  = False
+                q["missed"] = False
+                q["mark"]   = None   # Phase 2 will repopulate this on the new attempt
+                q["attempt"] += 1
+
     # THEORY SECTION 
     def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
         if self.course_type != "Theory":
@@ -279,6 +306,11 @@ class CourseManager:
             return 0.0
         return sum(c.knowledge * c.credits for c in self.courses) / sum(c.credits for c in self.courses)
 
+    def reset_quizzes_for_week(self, week: int) -> None:
+        """Rewind quiz state across all courses for the given week."""
+        for course in self.courses:
+            course.reset_for_week_repeat(week)
+
     def apply_schedule(self, schedule: dict):
         """Apply a schedule dict {(day_idx, slot_idx): Course} onto course objects."""
         # Clear existing slots
@@ -317,8 +349,9 @@ class CourseManager:
 
             course.scheduled_quizzes = []
             used: set[tuple[int, int]] = set()  # (week, day_idx) → no double-booking
+            next_quiz_num = 1
 
-            def _pick(week_pool: list[int], weights: list[int]) -> dict | None:
+            def _pick(week_pool: list[int], weights: list[int], q_num: int) -> dict | None:
                 """
                 Attempt up to 30 times to find a unique (week, day_idx) slot.
                 Returns a quiz dict or None if every attempt collides.
@@ -330,28 +363,32 @@ class CourseManager:
                     if key not in used:
                         used.add(key)
                         return {
+                            "quiz_number": q_num,
                             "week":     week,
                             "day_idx":  day_idx,
                             "slot_idx": slot_idx,
                             "taken":    False,
                             "missed":   False,
-                            "mark":     None,   # filled later when grade-entry is added
+                            "mark":     None,
+                            "attempt":  0,
                         }
                 return None  # extremely unlikely
 
             # 2 quizzes before mid (weeks 1-7)
             pre_weeks = list(range(1, 8))
             for _ in range(2):
-                q = _pick(pre_weeks, self._PRE_MID_WEIGHTS)
+                q = _pick(pre_weeks, self._PRE_MID_WEIGHTS, next_quiz_num)
                 if q:
                     course.scheduled_quizzes.append(q)
+                    next_quiz_num += 1
 
             # 2 quizzes after mid (weeks 8-15)
             post_weeks = list(range(8, 16))
             for _ in range(2):
-                q = _pick(post_weeks, self._POST_MID_WEIGHTS)
+                q = _pick(post_weeks, self._POST_MID_WEIGHTS, next_quiz_num)
                 if q:
                     course.scheduled_quizzes.append(q)
+                    next_quiz_num += 1
 
             # Sort chronologically for the dashboard
             course.scheduled_quizzes.sort(key=lambda q: (q["week"], q["day_idx"]))
