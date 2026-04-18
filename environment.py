@@ -85,11 +85,11 @@ def draw_clock(screen, clock_font, date_font, time_of_day: float,
     box_x = WIDTH - bar_space - box_w
     box_y = 95
 
-    clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-    clock_bg.fill((0, 0, 0, 180))
-    screen.blit(clock_bg, (box_x, box_y))
+    # clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    # clock_bg.fill((0, 0, 0, 180))
+    # screen.blit(clock_bg, (box_x, box_y))
 
-    y = 100
+    y = 120
     screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, y))
     y += time_surf.get_height() - 10
     #screen.blit(day_surf,  (box_x + box_w - day_surf.get_width()  - 10, y))

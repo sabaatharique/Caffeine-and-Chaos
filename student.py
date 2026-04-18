@@ -118,7 +118,7 @@ class Student:
         self.update_action_status()
         return messages
 
-    # ── Sickness helpers ────────────────────────────────────────────────────────
+    # Sickness helpers 
 
     def _record_daily_history(self):
         """Snapshot today's stress & health into rolling history."""
@@ -132,25 +132,18 @@ class Student:
 
     def _compute_sickness_prob(self) -> float:
         """Return today's Bernoulli probability of falling sick."""
-        if not self._stress_history:          # no history yet → baseline only
-            return self._SICKNESS_BASE_PROB
-
-        avg_stress = sum(self._stress_history) / len(self._stress_history)
-        avg_health = sum(self._health_history) / len(self._health_history)
-
-        stress_factor = 0.02 * (avg_stress / 100)
-        health_factor = 0.02 * (1 - avg_health / 100)
-
-        p = self._SICKNESS_BASE_PROB + stress_factor + health_factor
-        return min(p, self._SICKNESS_MAX_PROB)
+        import events
+        return events.compute_sickness_prob(
+            self._stress_history,
+            self._health_history,
+            self._SICKNESS_BASE_PROB,
+            self._SICKNESS_MAX_PROB
+        )
 
     def _generate_sick_duration(self) -> int:
         """Sample illness duration from a geometric distribution."""
-        days = 0
-        while True:
-            days += 1
-            if random.random() < self._RECOVERY_PROB:
-                return days
+        import events
+        return events.generate_sick_duration(self._RECOVERY_PROB)
 
     @property
     def sick_active(self) -> bool:
@@ -205,11 +198,10 @@ class Student:
                 self.health -= 10
                 self.stress += 10
                 if exhausted:
-                    messages.append("[SICK!] Your health hit zero! You've collapsed from exhaustion.")
+                    messages.append(f"[SICK!] Your health hit zero! You've collapsed from exhaustion.\nSick for {self.sick_days_remaining} days.")
                 else:
-                    messages.append("[SICK!] You've fallen ill! Health -10, Stress +10.")
+                    messages.append(f"[SICK!] You've fallen ill for {self.sick_days_remaining} days!\nHealth -10, Stress +10.")
                 messages.append("[SICK!] Study efficiency halved. Classes will be missed.")
-        # ── END sickness block ────────────────────────────────────────────────
 
         messages.extend(self.clamp())
         return messages

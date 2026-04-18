@@ -51,11 +51,11 @@ def game_screen(screen, background_image, student, bars, buttons,
         msg_box_w = 265
         msg_box_h = len(messages) * 30 + 20
         msg_box_x = bar_margin
-        msg_box_y = 210
+        msg_box_y = 380
 
-        msg_overlay = pygame.Surface((msg_box_w, msg_box_h), pygame.SRCALPHA)
-        msg_overlay.fill((0, 0, 0, 180))
-        screen.blit(msg_overlay, (msg_box_x, msg_box_y))
+        # msg_overlay = pygame.Surface((msg_box_w, msg_box_h), pygame.SRCALPHA)
+        # msg_overlay.fill((0, 0, 0, 180))
+        # screen.blit(msg_overlay, (msg_box_x, msg_box_y))
 
         y_offset = msg_box_y + 10
         for msg in messages:
@@ -142,7 +142,7 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
         # Larger font for sickness notice
         sick_font = pygame.font.Font("assets/fonts/Papernotes.otf", 26)
         sick_surf = sick_font.render(
-            " YOU ARE SICK: STUDY -50% | CLASSES BLOCKED",
+            " YOU ARE SICK: STUDY -50%, CLASSES BLOCKED",
             True, (255, 50, 50)
         )
         # Add a subtle background for the sickness notice to pop more

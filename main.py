@@ -7,7 +7,8 @@ from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
 from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
-                QuizResultBox, AcademicDashboard, QuizWeekPromptBox)
+                QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
+                QuizInterruptBox)
 from screens import main_menu, game_screen, day_end_screen, save_prompt_screen, exam_screen, semester_end_screen
 from savegame import save_game, load_game, delete_save, save_exists
 
@@ -48,7 +49,7 @@ _classes_resolved: set = set() # start_hours already handled today
 _pending_class: tuple | None = None  # class currently shown in interrupt box
 _classes_populated_for_day: int = 0  # day_count when todays_classes was last built
 
-# ── Quiz interrupt state ───────────────────────────────────────────────────
+# Quiz interrupt state  
 _quizzes_resolved_today: set = set()
 # Each element is a tuple: (course_name, week, day_idx)
 # Reset every time day_count increments, the same way _classes_resolved is reset.
@@ -77,6 +78,7 @@ class ReplayRunner:
         self.msgs = []
         self.done = False
         self.burnout_occurred = False
+        self.pending_quiz: tuple | None = None   # (quiz_dict, course) when waiting for player
 
         self._day_outages = wifi_failure_event()
         self._outage_idx = 0
@@ -113,6 +115,7 @@ class ReplayRunner:
                     "sickness"
                 )
             elif any("[RECOVERED]" in m for m in day_msgs):
+                self.msgs = [m for m in self.msgs if not m.startswith('[SICK')]
                 alert_info = (
                     "RECOVERED!",
                     "You've fought off the illness and are back to full efficiency.\n"
@@ -206,7 +209,7 @@ class ReplayRunner:
                 if action_start < e <= action_end and action != 'attend_class':
                     c.occurred_classes += 1
 
-        # ── Quiz auto-resolution (during fast-forward) ──
+        # Quiz interrupt — pause and let player decide
         from environment import SLOT_TIMES
         for c in self.course_manager.courses:
             if c.course_type != "Theory":
@@ -214,19 +217,26 @@ class ReplayRunner:
             for quiz in c.scheduled_quizzes:
                 if quiz["taken"]:
                     continue
-                # Match week + day (ReplayRunner uses raw day_count)
-                _q_wk = ((self.current_day - 1) // 7) + 1
+                _q_wk  = ((self.current_day - 1) // 7) + 1
                 _q_diw = ((self.current_day - 1) % 7) + 1
                 if quiz["week"] != _q_wk or quiz["day_idx"] != (_q_diw - 1):
                     continue
-                
                 start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
-                if action_start <= start_h < action_end or self.time_cursor >= start_h:
-                    # Mark as taken (or missed if sick) — no mark generated yet
-                    quiz["taken"] = True
-                    if self.student.is_sick:
-                        quiz["missed"] = True
-                    # quiz["mark"] stays None — Phase 2 result system fills this in
+                if not (action_start <= start_h < action_end or self.time_cursor >= start_h):
+                    continue
+                # Pause the runner — main loop will open QuizInterruptBox
+                self.pending_quiz = (quiz, c)
+                break
+            if self.pending_quiz:
+                break
+
+        if self.pending_quiz:
+            # Advance time/action BEFORE pausing so the quiz fires at the right moment
+            self.time_cursor    = action_end
+            self.action_idx    += 1
+            self.current_action = action
+            self.msgs.extend(new_msgs)
+            return new_msgs, None
 
         self.time_cursor    = action_end
         self.action_idx    += 1
@@ -272,6 +282,7 @@ class WeekReplayRunner:
         self.burnout_occurred = False
         self.current_action = None
         self.quiz_week_pending = False   # True when next week has quizzes — awaiting player choice
+        self.pending_quiz: tuple | None = None   # (quiz_dict, course) when waiting for player
 
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
@@ -373,6 +384,7 @@ class WeekReplayRunner:
                     "sickness"
                 )
             elif any("[RECOVERED]" in m for m in day_msgs):
+                self.msgs = [m for m in self.msgs if not m.startswith('[SICK')]
                 alert_info = (
                     "RECOVERED!",
                     "You've fought off the illness and are back to full efficiency.\n"
@@ -453,14 +465,14 @@ class WeekReplayRunner:
             if _actual:
                 new_msgs.extend(self.student.attend_class(_actual))
 
-        # ── Silent Class Resolution (for missed classes during replay) ──
+        # Silent Class Resolution (for missed classes during replay) 
         if _diw <= 5:
             _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
             for s, e, c in _todays:
                 if action_start < e <= action_end and action != 'attend_class':
                     c.occurred_classes += 1
 
-        # ── Quiz auto-resolution (during fast-forward) ──
+        # Quiz interrupt — pause and let player decide
         from environment import SLOT_TIMES
         for c in self.course_manager.courses:
             if c.course_type != "Theory":
@@ -468,17 +480,22 @@ class WeekReplayRunner:
             for quiz in c.scheduled_quizzes:
                 if quiz["taken"]:
                     continue
-                # Match week + day (WeekReplayRunner has dedicated counters)
                 if quiz["week"] != self.current_week or quiz["day_idx"] != (self.current_day_in_week - 1):
                     continue
-                
                 start_h, _ = SLOT_TIMES[quiz["slot_idx"]]
-                if action_start <= start_h < action_end or self.time_cursor >= start_h:
-                    # Mark as taken (or missed if sick) — no mark generated yet
-                    quiz["taken"] = True
-                    if self.student.is_sick:
-                        quiz["missed"] = True
-                    # quiz["mark"] stays None — Phase 2 result system fills this in
+                if not (action_start <= start_h < action_end or self.time_cursor >= start_h):
+                    continue
+                self.pending_quiz = (quiz, c)
+                break
+            if self.pending_quiz:
+                break
+
+        if self.pending_quiz:
+            self.time_cursor  = action_end
+            self.action_idx  += 1
+            self.current_action = action
+            self.msgs.extend(new_msgs)
+            return new_msgs, None
 
         self.time_cursor  = action_end
         self.action_idx  += 1
@@ -561,6 +578,7 @@ class_interrupt_box = ClassInterruptBox(button_font, input_font)
 wizard     = SetupWizard(message_font, input_font, button_font)
 quiz_result_box = QuizResultBox(WIDTH, HEIGHT)
 quiz_week_prompt_box = QuizWeekPromptBox(alert_title_font, alert_body_font)
+quiz_interrupt_box = QuizInterruptBox(button_font, input_font)
 academic_dashboard = AcademicDashboard(
     WIDTH, HEIGHT,
     message_font,
@@ -596,9 +614,10 @@ sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", butt
 relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
 drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
 eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
+stats_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 440, btn_w, btn_h, "Course Panel", button_font)
 
 dashboard_btn = None   # Removed as it's now persistent
-game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
+game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn, stats_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
 _btn_y = HEIGHT // 2 + 50
@@ -643,7 +662,7 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
             current_game_bg = bg_map['burnout']
         if any("recovered from burnout" in m for m in eod_msgs):
             burnout_active = False
-        # ── Sickness detection ─────────────────────────────────────────────
+        # Sickness detection 
         sick_active = student.is_sick
         if any("[SICK!]" in m for m in eod_msgs):
             current_game_bg = bg_map.get('sick', bg_map['burnout'])
@@ -665,7 +684,7 @@ def _check_day_end(new_msgs: list[str]) -> list[str]:
                 "STAY VIGILANT!",
                 color_type="recovery"
             )
-        # ── END sickness detection ─────────────────────────────────────────
+        # END sickness detection
         day_over = True
         current_screen_state = DAY_END_SCREEN
     return new_msgs
@@ -688,7 +707,9 @@ while running:
     # Button enable state
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
-            btn.enabled = False
+            if btn != stats_btn:
+                btn.enabled = False
+        stats_btn.enabled = True
     else:
         study_btn.enabled = student.action_status['study'] and remaining_hours > 0
         sleep_btn.enabled = student.action_status['sleep'] and remaining_hours > 0
@@ -930,11 +951,14 @@ while running:
                     print(f"Time of day: {format_time(time_of_day)}")
                     _check_day_end(new_messages)
 
+                if stats_btn.clicked(event):
+                    academic_dashboard.expanded = not academic_dashboard.expanded
+
             if new_messages:
                 messages.extend(new_messages)
                 messages = messages[-5:]
 
-            # ── Quiz interrupt trigger (GAME_SCREEN, weekdays only) ─────────────────
+            # Quiz interrupt trigger (GAME_SCREEN, weekdays only)
             if (current_screen_state == GAME_SCREEN
                     and not day_over
                     and not class_interrupt_box.active   # don't stack interrupts
@@ -967,7 +991,7 @@ while running:
                         if time_of_day < start_h:
                             continue    # slot hasn't started yet
 
-                        # ── Quiz fires ──
+                        # Quiz fires
                         _quizzes_resolved_today.add(key)
                         quiz["taken"] = True
 
@@ -986,8 +1010,28 @@ while running:
 
         # Day-End Screen
         elif current_screen_state == DAY_END_SCREEN:
+            # Quiz interrupt (replay) — highest priority
+            if quiz_interrupt_box.active:
+                choice = quiz_interrupt_box.handle_event(event)
+                if choice is not None:
+                    # Resolve for whichever runner owns the pending quiz
+                    runner = replay_runner if (replay_runner and replay_runner.pending_quiz) else (
+                             week_replay_runner if (week_replay_runner and week_replay_runner.pending_quiz) else None)
+                    if runner and runner.pending_quiz:
+                        quiz, course = runner.pending_quiz
+                        quiz["taken"] = True
+                        if choice == "skip" or runner.student.is_sick:
+                            quiz["missed"] = True
+                            msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} SKIPPED."
+                        else:
+                            quiz["missed"] = False
+                            msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken."
+                        runner.msgs.append(msg)
+                        messages = runner.last_msgs()
+                        runner.pending_quiz = None
+
             # AlertBox intercepts all input while active during replay 
-            if alert_box.active:
+            elif alert_box.active:
                 dismissed = alert_box.handle_event(event)
                 # After dismissal, tick the active runner to continue
                 if dismissed:
@@ -1160,29 +1204,44 @@ while running:
             and not replay_runner.done
             and not alert_box.active
             and not repeat_box.active
-            and not week_repeat_box.active):
-        prev_day = replay_runner.current_day
-        step_msgs, alert_info = replay_runner.tick()
-        if alert_info:
-            alert_box.open(*alert_info)
-        messages = replay_runner.last_msgs()
-        day_count = replay_runner.current_day
-        time_of_day = replay_runner.time_cursor
-        if replay_runner.current_action:
-            current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
-        if replay_runner.done and replay_runner.burnout_occurred:
-            burnout_active = True
-        # Sync sick_active from student truth
-        sick_active = student.is_sick
-        # Sync week_actions so weeks completed by replay are tracked
-        if day_count != prev_day:
-            new_diy = ((day_count - 1) % 7) + 1
-            if new_diy == 1:
-                week_actions.clear()  # week boundary crossed
-            else:
-                # Fill in any replayed days within this week
-                while len(week_actions) < new_diy - 1:
-                    week_actions.append(list(day_actions))
+            and not week_repeat_box.active
+            and not quiz_interrupt_box.active):
+        # Open interrupt box if runner is sitting on a pending quiz
+        if replay_runner.pending_quiz:
+            quiz, course = replay_runner.pending_quiz
+            quiz_interrupt_box.open(course, quiz["quiz_number"])
+        else:
+            prev_day = replay_runner.current_day
+            step_msgs, alert_info = replay_runner.tick()
+            if alert_info:
+                alert_box.open(*alert_info)
+            messages = replay_runner.last_msgs()
+            day_count = replay_runner.current_day
+            time_of_day = replay_runner.time_cursor
+            if replay_runner.current_action:
+                current_game_bg = bg_map.get(replay_runner.current_action, bg_map['default'])
+            if replay_runner.done and replay_runner.burnout_occurred:
+                burnout_active = True
+            # Sync sick_active from student truth
+            sick_active = student.is_sick
+            # Sync week_actions so weeks completed by replay are tracked
+            if day_count != prev_day:
+                new_diy = ((day_count - 1) % 7) + 1
+                if new_diy == 1:
+                    week_actions.clear()  # week boundary crossed
+                else:
+                    # Fill in any replayed days within this week
+                    while len(week_actions) < new_diy - 1:
+                        week_actions.append(list(day_actions))
+
+    # Resolve quiz_interrupt_box choice for day runner
+    if (not quiz_interrupt_box.active
+            and replay_runner is not None
+            and replay_runner.pending_quiz):
+        quiz, course = replay_runner.pending_quiz
+        # quiz_interrupt_box just closed — determine last result
+        # We detect close by checking active went False (handled in event loop below)
+        pass  # resolution handled in event section
 
     # Active replay tick (week runner)
     if (current_screen_state == DAY_END_SCREEN
@@ -1191,36 +1250,42 @@ while running:
             and not week_replay_runner.quiz_week_pending
             and not alert_box.active
             and not repeat_box.active
-            and not week_repeat_box.active):
-        step_msgs, alert_info = week_replay_runner.tick()
-        if alert_info:
-            alert_box.open(*alert_info)
-        messages = week_replay_runner.last_msgs()
-        day_count = week_replay_runner.current_day
-        week_count = week_replay_runner.current_week
-        day_in_week = week_replay_runner.current_day_in_week
-        time_of_day = week_replay_runner.time_cursor
-        if week_replay_runner.current_action:
-            current_game_bg = bg_map.get(week_replay_runner.current_action, bg_map['default'])
-        if week_replay_runner.done and week_replay_runner.burnout_occurred:
-            burnout_active = True
-            current_game_bg = bg_map['burnout']
-        # Sync sick_active from student truth
-        sick_active = student.is_sick
-        # If the runner just paused for a quiz-week prompt, open the dialog
-        if (week_replay_runner.quiz_week_pending
-                and not quiz_week_prompt_box.active):
-            quizzes = week_replay_runner.get_next_week_quizzes()
-            quiz_week_prompt_box.open(week_replay_runner.current_week, quizzes)
-        # Check for exam milestone after week replay finishes
-        if week_replay_runner.done and not week_replay_runner.burnout_occurred:
-            # current_week is the last week the runner was in (7 or 15)
-            if week_count == 7 and day_in_week == 7:
-                exam_type = "mid"
-                current_screen_state = EXAM_SCREEN
-            elif week_count == 15 and day_in_week == 7:
-                exam_type = "final"
-                current_screen_state = EXAM_SCREEN
+            and not week_repeat_box.active
+            and not quiz_interrupt_box.active):
+        # Open interrupt box if runner is sitting on a pending quiz
+        if week_replay_runner.pending_quiz:
+            quiz, course = week_replay_runner.pending_quiz
+            quiz_interrupt_box.open(course, quiz["quiz_number"])
+        else:
+            step_msgs, alert_info = week_replay_runner.tick()
+            if alert_info:
+                alert_box.open(*alert_info)
+            messages = week_replay_runner.last_msgs()
+            day_count = week_replay_runner.current_day
+            week_count = week_replay_runner.current_week
+            day_in_week = week_replay_runner.current_day_in_week
+            time_of_day = week_replay_runner.time_cursor
+            if week_replay_runner.current_action:
+                current_game_bg = bg_map.get(week_replay_runner.current_action, bg_map['default'])
+            if week_replay_runner.done and week_replay_runner.burnout_occurred:
+                burnout_active = True
+                current_game_bg = bg_map['burnout']
+            # Sync sick_active from student truth
+            sick_active = student.is_sick
+            # If the runner just paused for a quiz-week prompt, open the dialog
+            if (week_replay_runner.quiz_week_pending
+                    and not quiz_week_prompt_box.active):
+                quizzes = week_replay_runner.get_next_week_quizzes()
+                quiz_week_prompt_box.open(week_replay_runner.current_week, quizzes)
+            # Check for exam milestone after week replay finishes
+            if week_replay_runner.done and not week_replay_runner.burnout_occurred:
+                # current_week is the last week the runner was in (7 or 15)
+                if week_count == 7 and day_in_week == 7:
+                    exam_type = "mid"
+                    current_screen_state = EXAM_SCREEN
+                elif week_count == 15 and day_in_week == 7:
+                    exam_type = "final"
+                    current_screen_state = EXAM_SCREEN
 
     # Class interrupt trigger (GAME_SCREEN, weekdays only)
     if (current_screen_state == GAME_SCREEN
@@ -1355,7 +1420,8 @@ while running:
         )
         academic_dashboard.draw(screen, course_manager, week_count)
         quiz_week_prompt_box.draw(screen)
-        
+        quiz_interrupt_box.draw(screen)   # replay quiz Take/Skip prompt
+
     elif current_screen_state == EXAM_SCREEN:
         exam_screen(screen, exam_type, exam_continue_btn, message_font)
 

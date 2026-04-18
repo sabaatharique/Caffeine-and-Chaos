@@ -334,8 +334,6 @@ class CourseManager:
 
     # Weighted probability per week for each quiz window.
     # Index 0 = first week of the window.
-    _PRE_MID_WEIGHTS  = [1, 1, 2, 4, 5, 5, 4]   # weeks 1-7
-    _POST_MID_WEIGHTS = [1, 1, 2, 4, 5, 5, 4, 3] # weeks 8-15
 
     def schedule_all_quizzes(self):
         """
@@ -345,7 +343,7 @@ class CourseManager:
         Each quiz lands on one of the course's own class slots so it fires
         exactly when the player would normally be in lecture.
         """
-        import random
+        import events
 
         for course in self.courses:
             if course.course_type != "Theory":
@@ -353,48 +351,8 @@ class CourseManager:
             if not course.weekly_slots:
                 continue  # shouldn't happen, but be safe
 
-            course.scheduled_quizzes = []
             used: set[tuple[int, int]] = set()  # (week, day_idx) → no double-booking
-            next_quiz_num = 1
-
-            def _pick(week_pool: list[int], weights: list[int], q_num: int) -> dict | None:
-                """
-                Attempt up to 30 times to find a unique (week, day_idx) slot.
-                Returns a quiz dict or None if every attempt collides.
-                """
-                for _ in range(30):
-                    week = random.choices(week_pool, weights=weights[:len(week_pool)], k=1)[0]
-                    day_idx, slot_idx = random.choice(course.weekly_slots)
-                    key = (week, day_idx)
-                    if key not in used:
-                        used.add(key)
-                        return {
-                            "quiz_number": q_num,
-                            "week":     week,
-                            "day_idx":  day_idx,
-                            "slot_idx": slot_idx,
-                            "taken":    False,
-                            "missed":   False,
-                            "mark":     None,
-                            "attempt":  0,
-                        }
-                return None  # extremely unlikely
-
-            # 2 quizzes before mid (weeks 1-7)
-            pre_weeks = list(range(1, 8))
-            for _ in range(2):
-                q = _pick(pre_weeks, self._PRE_MID_WEIGHTS, next_quiz_num)
-                if q:
-                    course.scheduled_quizzes.append(q)
-                    next_quiz_num += 1
-
-            # 2 quizzes after mid (weeks 8-15)
-            post_weeks = list(range(8, 16))
-            for _ in range(2):
-                q = _pick(post_weeks, self._POST_MID_WEIGHTS, next_quiz_num)
-                if q:
-                    course.scheduled_quizzes.append(q)
-                    next_quiz_num += 1
+            course.scheduled_quizzes = events.generate_quiz_schedule(course.weekly_slots, used)
 
             # Sort chronologically for the dashboard
             course.scheduled_quizzes.sort(key=lambda q: (q["week"], q["day_idx"]))
