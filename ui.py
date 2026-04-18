@@ -813,6 +813,130 @@ class QuizInterruptBox:
         screen.blit(s_surf, s_surf.get_rect(center=self._skip_btn.center))
 
 
+class LabAssessmentInterruptBox:
+    """Modal shown during live-play and replay when a scheduled lab mid/final slot is reached.
+    Player can choose to Take or Skip the assessment.
+    """
+
+    _BG       = (15, 35, 35)
+    _BORDER   = (60, 220, 180)
+    _TITLE_MID   = (80, 230, 200)
+    _TITLE_FINAL = (255, 200, 80)
+    _BODY_C   = (210, 240, 235)
+    _TAKE_C   = (60, 200, 130)
+    _SKIP_C   = (210, 70,  70)
+
+    def __init__(self, font, smallfont):
+        self.font      = font
+        self.smallfont = smallfont
+        self.active    = False
+
+        self._course          = None
+        self._assessment_type = "lab_mid"   # "lab_mid" or "lab_final"
+        self._take_btn        = None
+        self._skip_btn        = None
+
+    def open(self, course, assessment_type: str):
+        self.active            = True
+        self._course           = course
+        self._assessment_type  = assessment_type
+
+    def handle_event(self, event) -> str | None:
+        """Return 'take', 'skip', or None."""
+        if not self.active:
+            return None
+
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_RETURN, pygame.K_t):
+                return self._confirm("take")
+            if event.key in (pygame.K_s, pygame.K_ESCAPE):
+                return self._confirm("skip")
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+            if self._take_btn and self._take_btn.collidepoint(mx, my):
+                return self._confirm("take")
+            if self._skip_btn and self._skip_btn.collidepoint(mx, my):
+                return self._confirm("skip")
+
+        return None
+
+    def _confirm(self, result: str) -> str:
+        self.active = False
+        return result
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        sw, sh = screen.get_size()
+
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 190))
+        screen.blit(overlay, (0, 0))
+
+        box_w, box_h = 480, 240
+        box_x = (sw - box_w) // 2
+        box_y = (sh - box_h) // 2
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+
+        pygame.draw.rect(screen, self._BG,    box_rect, border_radius=14)
+        pygame.draw.rect(screen, self._BORDER, box_rect, 2, border_radius=14)
+
+        # Header stripe — teal for mid, amber for final
+        is_final  = self._assessment_type == "lab_final"
+        stripe_col = (20, 70, 55) if not is_final else (70, 50, 10)
+        stripe = pygame.Rect(box_x, box_y, box_w, 40)
+        pygame.draw.rect(screen, stripe_col, stripe, border_radius=14)
+        pygame.draw.rect(screen, stripe_col,
+                         pygame.Rect(box_x, box_y + 20, box_w, 20))
+
+        label     = "Lab Final Exam!" if is_final else "Lab Midterm!"
+        title_col = self._TITLE_FINAL if is_final else self._TITLE_MID
+        title_surf = self.font.render(label, True, title_col)
+        screen.blit(title_surf, title_surf.get_rect(centerx=box_rect.centerx, y=box_y + 8))
+
+        y = box_y + 58
+        course_name = self._course.name if self._course else "Unknown"
+        cname_surf = self.font.render(course_name, True, (255, 255, 255))
+        screen.blit(cname_surf, cname_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += cname_surf.get_height() + 8
+
+        sub_text = ("This is your Lab Final - give it everything!" if is_final
+                    else "Lab Midterm time - show your practical skills!")
+        sub_surf = self.smallfont.render(sub_text, True, self._BODY_C)
+        screen.blit(sub_surf, sub_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += sub_surf.get_height() + 8
+
+        prompt_surf = self.smallfont.render(
+            "Do you want to take this assessment or skip it?", True, self._BODY_C)
+        screen.blit(prompt_surf, prompt_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += prompt_surf.get_height() + 18
+
+        btn_w, btn_h = 160, 44
+        gap = 20
+        total_btn_w = btn_w * 2 + gap
+        left_x = box_rect.centerx - total_btn_w // 2
+
+        mouse = pygame.mouse.get_pos()
+
+        self._take_btn = pygame.Rect(left_x, y, btn_w, btn_h)
+        take_hov = self._take_btn.collidepoint(mouse)
+        take_col = (40, 180, 100) if take_hov else (30, 150, 80)
+        pygame.draw.rect(screen, take_col, self._take_btn, border_radius=8)
+        pygame.draw.rect(screen, self._TAKE_C, self._take_btn, 2, border_radius=8)
+        t_surf = self.font.render("Take  [T]", True, (255, 255, 255))
+        screen.blit(t_surf, t_surf.get_rect(center=self._take_btn.center))
+
+        self._skip_btn = pygame.Rect(left_x + btn_w + gap, y, btn_w, btn_h)
+        skip_hov = self._skip_btn.collidepoint(mouse)
+        skip_col = (180, 50, 50) if skip_hov else (140, 30, 30)
+        pygame.draw.rect(screen, skip_col, self._skip_btn, border_radius=8)
+        pygame.draw.rect(screen, self._SKIP_C, self._skip_btn, 2, border_radius=8)
+        s_surf = self.font.render("Skip  [S]", True, (255, 255, 255))
+        screen.blit(s_surf, s_surf.get_rect(center=self._skip_btn.center))
+
+
 # Schedule Builder
 
 # University timetable constants
@@ -1093,7 +1217,7 @@ class ScheduleBuilder:
         self._confirm_btn.rect.y = btn_y
         self._clear_btn.rect.centerx = sw // 2 - 80
         self._clear_btn.rect.y = btn_y
-        self._skip_btn.rect.right = sw - pad
+        self._skip_btn.rect.centerx = sw // 2 + 260
         self._skip_btn.rect.y = btn_y
         self._confirm_btn.draw(screen)
         self._clear_btn.draw(screen)
@@ -1727,21 +1851,21 @@ class QuizWeekPromptBox:
 
         # Title 
         title_surf = self._title_font.render(
-            f"  Quiz Week Ahead!  ", True, self._TITLE)
+            f"  Assessment Week Ahead!  ", True, self._TITLE)
         screen.blit(title_surf,
                     title_surf.get_rect(centerx=card_x + card_w // 2, y=card_y + 16))
 
         # Sub-heading 
         sub_surf = self.small_font.render(
-            f"Week {self._week} has the following quizzes scheduled:", True, self._BODY)
+            f"Week {self._week} has the following assessments scheduled:", True, self._BODY)
         screen.blit(sub_surf,
                     sub_surf.get_rect(centerx=card_x + card_w // 2, y=card_y + 54))
 
         # Quiz list 
         y = card_y + 82
         for q in self._quizzes:
-            # q is a dict with {day, time, course_name, quiz_number}
-            line = f"> Quiz {q['quiz_number']} : {q['course_name']}  ({q['day']} at {q['time']})"
+            # q is a dict with {day, time, course_name, event_name}
+            line = f"> {q['event_name']} : {q['course_name']}  ({q['day']} at {q['time']})"
             line_surf = self.small_font.render(line, True, (220, 200, 100))
             screen.blit(line_surf, line_surf.get_rect(centerx=card_x + card_w // 2, y=y))
             y += row_h
@@ -1907,7 +2031,8 @@ class AcademicDashboard:
                                     content_x, y, content_alpha)
         else:
             for course in courses:
-                pct = course.get_attendance_percentage()
+                tot_classes = max(1, course.total_classes)
+                pct = min((course.attended_classes / tot_classes) * 100, 100.0)
                 att_color = (
                     self._C_ATT_GOOD if pct >= 75 else
                     self._C_ATT_WARN if pct >= 50 else
@@ -1921,7 +2046,7 @@ class AcademicDashboard:
                 screen.blit(name_surf, (content_x, y))
 
                 # Percentage and counts right-aligned
-                count_text = f"{course.attended_classes}/{course.occurred_classes or course.total_classes}"
+                count_text = f"{course.attended_classes}/{course.total_classes}"
                 pct_text = f"({pct:.0f}%)"
                 full_text = f"{count_text} {pct_text}"
                 
@@ -2000,6 +2125,44 @@ class AcademicDashboard:
                 line_text = f"Quiz {q['quiz_number']} : {self._truncate(q['course_name'], 15)}"
                 y = self._draw_complex_line(screen, line_text, status, content_x, y, content_alpha, st_color)
 
+        # UPCOMING LAB TESTS
+        y += 10
+        y = self._draw_section(screen, "UPCOMING LAB TESTS", content_x, content_w, y, content_alpha)
+        
+        upcoming_labs = self._get_upcoming_lab_assessments(course_manager, week_count)
+        if not upcoming_labs:
+            y = self._draw_dim_line(screen, "No lab tests soon.", content_x, y, content_alpha)
+        else:
+            from environment import SLOT_TIMES, DAYS_OF_WEEK, format_time
+            for la in upcoming_labs:
+                weeks_away = la["week"] - week_count
+                lab_color = self._C_QUIZ_THIS if weeks_away == 0 else self._C_QUIZ_NEXT
+                badge_text = "THIS WEEK" if weeks_away == 0 else "NEXT WEEK"
+                
+                day_short = DAYS_OF_WEEK[la["day_idx"]][:3]
+                time_str  = format_time(SLOT_TIMES[la["slot_idx"]][0])
+                atype = la["assessment_type"].replace('_', ' ').title()
+
+                label = f"{atype} : {self._truncate(la['course_name'], 18)}"
+                subtitle = f"{day_short} @ {time_str} :  {badge_text}"
+                y = self._draw_complex_line(screen, label, subtitle, content_x, y, content_alpha, lab_color)
+
+        # LAB TEST HISTORY 
+        y += 10
+        y = self._draw_section(screen, "LAB TEST HISTORY", content_x, content_w, y, content_alpha)
+        
+        lab_history = self._get_lab_history(course_manager)
+        if not lab_history:
+            y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
+        else:
+            for la in lab_history:
+                status = "MISSED" if la["missed"] else "TAKEN"
+                st_color = (255, 120, 120) if la["missed"] else (120, 255, 180)
+                
+                atype = la["assessment_type"].replace('_', ' ').title()
+                line_text = f"{atype} : {self._truncate(la['course_name'], 15)}"
+                y = self._draw_complex_line(screen, line_text, status, content_x, y, content_alpha, st_color)
+
         screen.set_clip(old_clip)
         total_h = y + int(self.scroll_y)
         self.max_scroll = max(0.0, total_h - sh + 20)
@@ -2072,6 +2235,19 @@ class AcademicDashboard:
         res.sort(key=lambda x: (x["week"], x["day_idx"], x["slot_idx"]))
         return res
 
+    def _get_upcoming_lab_assessments(self, course_manager, week_count: int) -> list[dict]:
+        """Fetch lab assessments for this week and next week."""
+        res = []
+        for course in course_manager.courses:
+            if course.course_type != "Lab": continue
+            for la in getattr(course, "scheduled_lab_assessments", []):
+                if la["taken"]: continue
+                weeks_away = la["week"] - week_count
+                if 0 <= weeks_away <= 1:
+                    res.append({**la, "course_name": course.name})
+        res.sort(key=lambda x: (x["week"], x["day_idx"], x["slot_idx"]))
+        return res
+
     def _get_quiz_history(self, course_manager) -> list[dict]:
         """Fetch all quizzes that have already been taken or missed."""
         res = []
@@ -2082,4 +2258,16 @@ class AcademicDashboard:
                     res.append({**q, "course_name": course.name})
         # Sort by week (descending) then quiz number
         res.sort(key=lambda x: (x["week"], x["quiz_number"]), reverse=True)
+        return res
+
+    def _get_lab_history(self, course_manager) -> list[dict]:
+        """Fetch all lab tests that have already been taken or missed."""
+        res = []
+        for course in course_manager.courses:
+            if course.course_type != "Lab": continue
+            for la in course.scheduled_lab_assessments:
+                if la["taken"]:
+                    res.append({**la, "course_name": course.name})
+        # Sort by week (descending)
+        res.sort(key=lambda x: x["week"], reverse=True)
         return res

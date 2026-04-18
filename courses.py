@@ -21,6 +21,9 @@ class Course:
         # Quizzes
         self.scheduled_quizzes: list[dict] = []
 
+        # Lab assessments (lab_mid / lab_final scheduled slots)
+        self.scheduled_lab_assessments: list[dict] = []
+
         # Theory
         self.mid_mark = None
         self.final_mark = None
@@ -45,13 +48,10 @@ class Course:
 
 
     def get_attendance_percentage(self):
-        """Return attendance as a percentage of classes that have actually occurred.
-        Falls back to total_classes when no classes have been recorded yet.
-        """
-        denom = self.occurred_classes if self.occurred_classes > 0 else self.total_classes
-        if denom == 0:
+        """Return attendance as a percentage of total semester classes completed."""
+        if self.total_classes == 0:
             return 0.0
-        return min((self.attended_classes / denom) * 100, 100.0)
+        return min((self.attended_classes / self.total_classes) * 100, 100.0)
     
     @property
     def quiz_marks(self) -> list[float]:
@@ -78,8 +78,15 @@ class Course:
             if q["week"] == week:
                 q["taken"]  = False
                 q["missed"] = False
-                q["mark"]   = None   # Phase 2 will repopulate this on the new attempt
+                q["mark"]   = None  
                 q["attempt"] += 1
+
+        for la in self.scheduled_lab_assessments:
+            if la["week"] == week:
+                la["taken"]  = False
+                la["missed"] = False
+                la["mark"]   = None
+                la["attempt"] += 1
 
     # THEORY SECTION 
     def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
@@ -102,8 +109,12 @@ class Course:
         self.quiz_marks.append(mark)
 
 
-    def generate_mid_mark(self, stress=0, sleep=1.0, health=100):
+    def generate_mid_mark(self, stress=0, sleep=1.0, health=100, is_sick=False):
         if self.course_type != "Theory":
+            return
+            
+        if is_sick:
+            self.mid_mark = 0
             return
 
         randomness = random.uniform(-8, 8)
@@ -118,8 +129,12 @@ class Course:
         self.mid_mark = max(0, min(100, base + randomness))
 
 
-    def generate_final_mark(self, stress=0, sleep=1.0, health=100):
+    def generate_final_mark(self, stress=0, sleep=1.0, health=100, is_sick=False):
         if self.course_type != "Theory":
+            return
+            
+        if is_sick:
+            self.final_mark = 0
             return
 
         randomness = random.uniform(-5, 5)
@@ -153,8 +168,12 @@ class Course:
         mark = max(0, min(100, base + randomness))
         self.lab_evaluations.append(mark)
 
-    def generate_lab_mid(self, stress=0, health=100):
+    def generate_lab_mid(self, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
+            return
+            
+        if is_sick:
+            self.lab_mid = 0
             return
 
         randomness = random.uniform(-5, 5)
@@ -167,8 +186,12 @@ class Course:
 
         self.lab_mid = max(0, min(100, base + randomness))
 
-    def generate_lab_final(self, stress=0, health=100):
+    def generate_lab_final(self, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
+            return
+            
+        if is_sick:
+            self.lab_final = 0
             return
 
         randomness = random.uniform(-5, 5)
@@ -356,3 +379,23 @@ class CourseManager:
 
             # Sort chronologically for the dashboard
             course.scheduled_quizzes.sort(key=lambda q: (q["week"], q["day_idx"]))
+
+    # Lab assessment scheduling
+
+    def schedule_all_lab_assessments(self):
+        """
+        Assign 1 lab-mid (week 6 or 7) + 1 lab-final (week 14 or 15) to every
+        lab course.  Call this ONCE after apply_schedule().
+        """
+        import events
+
+        for course in self.courses:
+            if course.course_type != "Lab":
+                continue
+            if not course.weekly_slots:
+                continue
+
+            course.scheduled_lab_assessments = events.generate_lab_assessment_schedule(
+                course.weekly_slots
+            )
+            course.scheduled_lab_assessments.sort(key=lambda a: (a["week"], a["day_idx"]))

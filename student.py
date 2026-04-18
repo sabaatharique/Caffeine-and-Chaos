@@ -227,7 +227,7 @@ class Student:
         self.stress += self.class_stress_rate
         self.motivation += 3
 
-        messages.append(f"Attended {course.name}. Knowledge +{self.class_knowledge_rate}.")
+        messages.append(f"Attended {course.name}: +{self.class_knowledge_rate:.1f} knowledge, -{self.class_sleep_loss:.1f} sleep, +{self.class_stress_rate:.1f} stress.")
         messages.extend(self.clamp())
         return messages
 
@@ -253,6 +253,8 @@ class Student:
         if wifi_penalty:
             self.stress += hours * self.wifi_stress_penalty
         self.health -= hours * self.study_health_rate
+        
+        messages.append(f"Studied {course.name} ({hours:.1f}h): +{gain:.1f} knowledge, -{hours * self.study_sleep_rate:.1f} sleep, +{hours * self.study_stress_rate:.1f} stress.")
 
         messages.extend(self.clamp())
         # If studying drained health to 0, trigger immediate sickness
@@ -267,6 +269,8 @@ class Student:
         self.sleep += hours * self.rest_sleep_rate
         self.stress -= hours * self.rest_stress_rate
         self.health += hours * self.rest_health_rate
+        
+        messages.append(f"Slept ({hours:.1f}h): +{hours*self.rest_sleep_rate:.1f} sleep, -{hours*self.rest_stress_rate:.1f} stress.")
 
         messages.extend(self.clamp())
         return messages
@@ -302,6 +306,7 @@ class Student:
         self.stress -= self.eat_stress_reduction
         self.hours_since_last_meal = 0.0  # reset hunger timer
 
+        messages.append(f"Ate a meal: -{self.eat_hunger_reduction:.1f} hunger, +{self.eat_health_gain:.1f} health.")
         messages.extend(self.clamp())
         return messages
 
@@ -317,6 +322,7 @@ class Student:
         self.health -= self.coffee_health_loss
         self.stress += self.coffee_stress_gain
 
+        messages.append(f"Drank coffee: +{self.coffee_sleep_gain:.1f} sleep, +{self.coffee_stress_gain:.1f} stress.")
         messages.extend(self.clamp())
         return messages
 
@@ -327,6 +333,7 @@ class Student:
         self.motivation += hours * self.relax_motivation_rate
         self.health += hours * self.relax_health_rate   # relaxing restores health
 
+        messages.append(f"Relaxed ({hours:.1f}h): -{hours*self.relax_stress_rate:.1f} stress, -{hours*self.relax_sleep_rate:.1f} sleep.")
         messages.extend(self.clamp())
         return messages
 
