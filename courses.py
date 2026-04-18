@@ -88,6 +88,21 @@ class Course:
                 la["mark"]   = None
                 la["attempt"] += 1
 
+    def reset_for_day_repeat(self, week: int, day_idx: int):
+        for q in self.scheduled_quizzes:
+            if q["week"] == week and q["day_idx"] == day_idx:
+                q["taken"]  = False
+                q["missed"] = False
+                q["mark"]   = None
+                q["attempt"] += 1
+
+        for la in self.scheduled_lab_assessments:
+            if la["week"] == week and la["day_idx"] == day_idx:
+                la["taken"]  = False
+                la["missed"] = False
+                la["mark"]   = None
+                la["attempt"] += 1
+
     # THEORY SECTION 
     def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
         if self.course_type != "Theory":
@@ -333,6 +348,13 @@ class CourseManager:
         """Rewind quiz state across all courses for the given week."""
         for course in self.courses:
             course.reset_for_week_repeat(week)
+
+    def reset_quizzes_for_day(self, day_count: int) -> None:
+        """Rewind quiz state across all courses for a specific day."""
+        week = ((day_count - 1) // 7) + 1
+        day_idx = (day_count - 1) % 7
+        for course in self.courses:
+            course.reset_for_day_repeat(week, day_idx)
 
     def apply_schedule(self, schedule: dict):
         """Apply a schedule dict {(day_idx, slot_idx): Course} onto course objects."""

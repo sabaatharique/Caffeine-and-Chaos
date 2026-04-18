@@ -107,6 +107,7 @@ class ReplayRunner:
 
         # If all actions for this day are done, run end_of_day
         if self.action_idx >= len(self.actions):
+            sweep_missed_assessments(self.course_manager, self.current_day, self.msgs)
             day_msgs = self.student.end_of_day()
             self.msgs.extend(day_msgs)
             self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
@@ -176,6 +177,7 @@ class ReplayRunner:
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
 
+        _actual = None  # course found by attend_class lookup (used by silent resolution)
         if action == 'study' and self.student.action_status['study']:
             target  = data if data else next(
                 (c for c in self.course_manager.courses if c.course_type == "Theory"),
@@ -208,12 +210,16 @@ class ReplayRunner:
             if _actual:
                 new_msgs.extend(self.student.attend_class(_actual))
 
-        # ── Silent Class Resolution (for missed classes during replay) ──
+        # Silent Class Resolution (for missed/auto-attended classes during replay)
+        # Runs for ALL action types. For 'attend_class' the directly-attended course
+        # is tracked so we never double-count it.
+        _directly_attended = _actual if action == 'attend_class' else None
         if _diw <= 5:
             _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
             for s, e, c in _todays:
-                # If a class slot ended during this action jump and we didn't attend it
-                if action_start < e <= action_end and action != 'attend_class':
+                if c is _directly_attended:
+                    continue  # already handled above
+                if action_start < e <= action_end:
                     if class_interrupt_box.attend_all:
                         new_msgs.extend(self.student.attend_class(c))
                         new_msgs.append(f"Auto-attended {c.name} during replay.")
@@ -302,7 +308,7 @@ class WeekReplayRunner:
         self.total_weeks  = n_weeks
         self.weeks_done   = 0
         self.current_day  = start_day
-        self.current_week = start_week
+        self.current_week = start_week + 1
         self.day_in_week  = 0          # 0-indexed within the replaying week
         self.action_idx   = 0
         self.time_cursor  = float(DAY_START)
@@ -415,6 +421,7 @@ class WeekReplayRunner:
 
         # All actions for this day done?
         if self.action_idx >= len(actions):
+            sweep_missed_assessments(self.course_manager, self.current_day, self.msgs)
             day_msgs = self.student.end_of_day()
             self.msgs.extend(day_msgs)
             self.msgs.append(f"Day {self.current_day} completed (fast-forward).")
@@ -479,6 +486,7 @@ class WeekReplayRunner:
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
 
+        _actual = None  # course found by attend_class lookup (used by silent resolution)
         if action == 'study' and self.student.action_status['study']:
             target = data if data else next(
                 (c for c in self.course_manager.courses if c.course_type == "Theory"),
@@ -512,16 +520,20 @@ class WeekReplayRunner:
             if _actual:
                 new_msgs.extend(self.student.attend_class(_actual))
 
-        # Silent Class Resolution (for missed classes during replay) 
+        # Silent Class Resolution (for all classes during week replay)
+        # Runs for ALL action types. Week repeat always attends all scheduled classes
+        # on the replayed days — class_interrupt_box.attend_all is always False by
+        # the time WeekReplayRunner starts (reset at each day-end), so we don't gate
+        # on it here. The directly-attended course is skipped to avoid double-counting.
+        _directly_attended = _actual if action == 'attend_class' else None
         if _diw <= 5:
             _todays = get_todays_classes(self.course_manager.courses, _diw, _week)
             for s, e, c in _todays:
-                if action_start < e <= action_end and action != 'attend_class':
-                    if class_interrupt_box.attend_all:
-                        new_msgs.extend(self.student.attend_class(c))
-                        new_msgs.append(f"Auto-attended {c.name} during replay.")
-                    else:
-                        c.occurred_classes += 1
+                if c is _directly_attended:
+                    continue  # already handled above
+                if action_start < e <= action_end:
+                    new_msgs.extend(self.student.attend_class(c))
+                    new_msgs.append(f"Auto-attended {c.name} during week replay.")
 
         # Quiz interrupt — pause and let player decide
         from environment import SLOT_TIMES
@@ -719,10 +731,31 @@ replay_runner: ReplayRunner | None = None
 _last_game_screen: str = MAIN_MENU
 
 
+def sweep_missed_assessments(c_manager, d_count, out_list):
+    """Mark unresolved quizzes/labs for today as missed and append notifications."""
+    diw = ((d_count - 1) % 7) + 1
+    wk = ((d_count - 1) // 7) + 1
+    for c in c_manager.courses:
+        if c.course_type == "Theory":
+            for q in c.scheduled_quizzes:
+                if not q["taken"] and q["week"] == wk and q["day_idx"] == (diw - 1):
+                    q["taken"] = True
+                    q["missed"] = True
+                    out_list.append(f"[QUIZ] {c.name} — Quiz {q['quiz_number']} SKIPPED (timeout).")
+        elif c.course_type == "Lab":
+            for la in getattr(c, "scheduled_lab_assessments", []):
+                if not la["taken"] and la["week"] == wk and la["day_idx"] == (diw - 1):
+                    la["taken"] = True
+                    la["missed"] = True
+                    atype = la["assessment_type"].replace('_', ' ').title()
+                    out_list.append(f"[LAB] {c.name} — {atype} SKIPPED (timeout).")
+
+
 def _check_day_end(new_msgs: list[str]) -> list[str]:
     """Call end_of_day if the day clock has run out; return extra messages."""
     global day_over, burnout_active, sick_active, current_screen_state, current_game_bg
     if round(time_of_day * 60) >= round(DAY_END * 60):
+        sweep_missed_assessments(course_manager, day_count, new_msgs)
         eod_msgs = student.end_of_day()
         new_msgs.extend(eod_msgs)
         new_msgs.append(f"Day {day_count} is over!")
@@ -987,7 +1020,23 @@ while running:
                         )
                     _check_day_end(new_messages)
 
-            elif not class_interrupt_box.active:
+            elif lab_assessment_interrupt_box.active:
+                la_result = lab_assessment_interrupt_box.handle_event(event)
+                if la_result is not None:
+                    la_course = lab_assessment_interrupt_box._course
+                    la_type = lab_assessment_interrupt_box._assessment_type
+                    for la in la_course.scheduled_lab_assessments:
+                        if la["assessment_type"] == la_type and la["week"] == week_count:
+                            if la_result == "skip" or student.is_sick:
+                                la["missed"] = True
+                                messages.append(f"[LAB] {la_course.name} — {la_type.replace('_', ' ').title()} SKIPPED.")
+                            else:
+                                la["missed"] = False
+                                messages.append(f"[LAB] {la_course.name} — {la_type.replace('_', ' ').title()} taken.")
+                            break
+                    messages = messages[-5:]
+
+            elif not class_interrupt_box.active and not lab_assessment_interrupt_box.active:
                 # Open the input prompt for actions that need hours
                 remaining_hours = DAY_END - time_of_day
 
@@ -1125,10 +1174,6 @@ while running:
                                 f"[LAB] {course.name} — "
                                 f"{la['assessment_type'].replace('_', ' ').title()} MISSED (sick).")
                         else:
-                            la["missed"] = False
-                            messages.append(
-                                f"[LAB] {course.name} — "
-                                f"{la['assessment_type'].replace('_', ' ').title()} taken.")
                             lab_assessment_interrupt_box.open(course, la["assessment_type"])
 
                         messages = messages[-5:]
@@ -1244,14 +1289,19 @@ while running:
                         full_week, n,
                         day_count, week_count
                     )
+                    assessments = week_replay_runner.get_next_week_assessments()
+                    if assessments:
+                        week_replay_runner.quiz_week_pending = True
+                        week_replay_runner.msgs.append(f"Week {week_replay_runner.current_week} begins but has assessments scheduled.")
+                    else:
+                        week_replay_runner.msgs.append(f"Week {week_replay_runner.current_week} begins (fast-forward).")
                     messages = []
 
             elif repeat_box.active:
                 n = repeat_box.handle_event(event)
                 if n is not None:
-                    # Rewind quizzes for this week so the day-repeat can re-trigger them
-                    _replay_week = ((day_count - 1) // 7) + 1
-                    course_manager.reset_quizzes_for_week(_replay_week)
+                    # Rewind quizzes for the exact day being repeated
+                    course_manager.reset_quizzes_for_day(day_count)
                     replay_runner = ReplayRunner(student, course_manager, day_actions, n, day_count)
                     messages = []
 
