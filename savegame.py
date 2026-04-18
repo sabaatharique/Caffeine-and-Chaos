@@ -16,6 +16,10 @@ def _student_to_dict(student) -> dict:
         "attendance": student.attendance,
         "consecutive_stress_days": student.consecutive_stress_days,
         "burnout_days_remaining": student.burnout_days_remaining,
+        "is_sick": student.is_sick,
+        "sick_days_remaining": student.sick_days_remaining,
+        "stress_history": student._stress_history,
+        "health_history": student._health_history,
     }
 
 
@@ -31,6 +35,10 @@ def _student_from_dict(data: dict, student):
     student.attendance = data.get("attendance", 0)
     student.consecutive_stress_days = data.get("consecutive_stress_days", 0)
     student.burnout_days_remaining = data.get("burnout_days_remaining", 5)
+    student.is_sick             = data.get("is_sick", False)
+    student.sick_days_remaining = data.get("sick_days_remaining", 0)
+    student._stress_history     = data.get("stress_history", [])
+    student._health_history     = data.get("health_history", [])
     student.update_action_status()
 
 
@@ -44,7 +52,6 @@ def _course_to_dict(course) -> dict:
         "total_classes": course.total_classes,
         "attended_classes": course.attended_classes,
         "max_lab_evaluations": course.max_lab_evaluations,
-        "quiz_marks": course.quiz_marks,
         "mid_mark": course.mid_mark,
         "final_mark": course.final_mark,
         "lab_evaluations": course.lab_evaluations,
@@ -52,6 +59,8 @@ def _course_to_dict(course) -> dict:
         "lab_final": course.lab_final,
         "grade_point": course.grade_point,
         "weekly_slots": [list(s) for s in course.weekly_slots],
+        "scheduled_quizzes": course.scheduled_quizzes,
+        "occurred_classes": course.occurred_classes,
     }
 
 
@@ -70,7 +79,6 @@ def _courses_from_dict(data_list: list, course_manager):
         )
         c.knowledge = d.get("knowledge", 10)
         c.attended_classes = d.get("attended_classes", 0)
-        c.quiz_marks = d.get("quiz_marks", [])
         c.mid_mark = d.get("mid_mark")
         c.final_mark = d.get("final_mark")
         c.lab_evaluations = d.get("lab_evaluations", [])
@@ -78,6 +86,16 @@ def _courses_from_dict(data_list: list, course_manager):
         c.lab_final = d.get("lab_final")
         c.grade_point = d.get("grade_point", 0.0)
         c.weekly_slots = [tuple(s) for s in d.get("weekly_slots", [])]
+        c.scheduled_quizzes = d.get("scheduled_quizzes", [])
+        # Migration guard for older saves
+        for i, q in enumerate(c.scheduled_quizzes):
+            if "quiz_number" not in q:
+                q["quiz_number"] = i + 1
+            if "attempt" not in q:
+                q["attempt"] = 0
+            if "mark" not in q:
+                q["mark"] = None
+        c.occurred_classes = d.get("occurred_classes", 0)
         course_manager.courses.append(c)
 
 
@@ -111,6 +129,7 @@ def save_game(student, course_manager,
               burnout_active, day_over,
               day_actions: list, week_actions: list,
               classes_resolved: set = None,
+              quizzes_resolved: set = None,
               attend_all_today: bool = False) -> bool:
     """
     Write all game state to SAVE_FILE.
@@ -128,6 +147,7 @@ def save_game(student, course_manager,
         "day_actions": _actions_to_serialisable(day_actions),
         "week_actions": [_actions_to_serialisable(d) for d in week_actions],
         "classes_resolved_today": list(classes_resolved) if classes_resolved else [],
+        "quizzes_resolved_today": list(quizzes_resolved) if quizzes_resolved else [],
         "attend_all_today": attend_all_today,
     }
     try:
@@ -174,6 +194,7 @@ def load_game(student, course_manager) -> dict | None:
             "day_actions": day_actions,
             "week_actions": week_actions,
             "classes_resolved_today": set(data.get("classes_resolved_today", [])),
+            "quizzes_resolved_today": {tuple(x) for x in data.get("quizzes_resolved_today", []) if isinstance(x, (list, tuple))},
             "attend_all_today": data.get("attend_all_today", False),
         }
     except Exception as e:
