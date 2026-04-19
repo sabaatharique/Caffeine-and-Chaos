@@ -40,7 +40,7 @@ class Course:
     def add_knowledge(self, amount):
         max_knowledge = 100.0
         if self.total_classes > 0:
-            max_knowledge = max(0.0, min(100.0, (self.occurred_classes / self.total_classes) * 100.0))
+            max_knowledge = min(100.0, 10.0 + (self.occurred_classes / self.total_classes) * 90.0)
         
         self.knowledge += amount
         self.knowledge = max(0, min(max_knowledge, self.knowledge))
@@ -61,16 +61,16 @@ class Course:
     def quiz_marks(self) -> list[float]:
         """
         Derive quiz marks from scheduled_quizzes.
-        Returns only quizzes where mark is not None (i.e., result system has run).
+        Returns marks for taken quizzes and 0.0 for missed quizzes.
         Ordered by quiz_number so calculate_total_marks() gets them in the right order.
-        Phase 1: always returns [] because mark stays None.
-        Phase 2: returns real values once the result system populates quiz["mark"].
         """
-        return [
-            q["mark"]
-            for q in sorted(self.scheduled_quizzes, key=lambda q: q["quiz_number"])
-            if q["taken"] and not q["missed"] and q["mark"] is not None
-        ]
+        marks = []
+        for q in sorted(self.scheduled_quizzes, key=lambda q: q["quiz_number"]):
+            if q["missed"]:
+                marks.append(0.0)
+            elif q["taken"] and q["mark"] is not None:
+                marks.append(q["mark"])
+        return marks
 
     def reset_for_week_repeat(self, week: int) -> None:
         """
@@ -116,7 +116,7 @@ class Course:
             return None
 
         randomness = random.uniform(-10, 10)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -141,7 +141,7 @@ class Course:
             return 0
 
         randomness = random.uniform(-8, 8)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -165,7 +165,7 @@ class Course:
             return 0
 
         randomness = random.uniform(-5, 5)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -189,7 +189,7 @@ class Course:
             return None
 
         randomness = random.uniform(-5, 5)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -206,13 +206,18 @@ class Course:
     def generate_lab_mid(self, week, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
             return None
+
+        for la in self.scheduled_lab_assessments:
+            if la["assessment_type"] == "lab_mid" and la["missed"]:
+                self.lab_mid = 0
+                return 0
             
         if is_sick:
             self.lab_mid = 0
             return 0
 
         randomness = random.uniform(-5, 5)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -229,12 +234,17 @@ class Course:
         if self.course_type != "Lab":
             return None
             
+        for la in self.scheduled_lab_assessments:
+            if la["assessment_type"] == "lab_final" and la["missed"]:
+                self.lab_final = 0
+                return 0
+
         if is_sick:
             self.lab_final = 0
             return 0
 
         randomness = random.uniform(-5, 5)
-        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
 
@@ -248,7 +258,10 @@ class Course:
         return self.lab_final
 
     def calculate_total_marks(self):
-
+        """
+        Returns the final percentage (0–100) for this course.
+        Returns None if not all assessments are in yet.
+        """
         # THEORY 
         if self.course_type == "Theory":
             if len(self.quiz_marks) < 4 or \
@@ -265,8 +278,7 @@ class Course:
                 self.final_mark * 0.50 +
                 self.get_attendance_percentage() * 0.10
             )
-
-            return total_percentage * self.credits
+            return max(0.0, min(100.0, total_percentage))
 
         #  LAB 
         elif self.course_type == "Lab":
@@ -283,31 +295,95 @@ class Course:
                 self.lab_final * 0.50 +
                 self.get_attendance_percentage() * 0.10
             )
+            return max(0.0, min(100.0, total_percentage))
 
-            return total_percentage * self.credits
+    def calculate_midterm_percentage(self):
+        """Return the weighted mark through the midterm only (quizzes + mid exam, attendance).
+        Returns None if midterm has not been taken yet.
+        """
+        if self.course_type == "Theory":
+            if self.mid_mark is None:
+                return None
+            best_quizzes = sorted(self.quiz_marks, reverse=True)[:3]
+            quiz_avg = sum(best_quizzes) / len(best_quizzes) if best_quizzes else 0
+            # Scale so quiz+mid+attendance = 50% total weight → normalise to 100
+            total = (
+                quiz_avg * 0.15 +
+                self.mid_mark * 0.25 +
+                self.get_attendance_percentage() * 0.10
+            ) / 0.50 * 100  # rescale to 100
+            return max(0.0, min(100.0, total))
+        elif self.course_type == "Lab":
+            if self.lab_mid is None:
+                return None
+            evaluation_avg = sum(self.lab_evaluations) / len(self.lab_evaluations) if self.lab_evaluations else 0
+            total = (
+                evaluation_avg * 0.15 +
+                self.lab_mid * 0.25 +
+                self.get_attendance_percentage() * 0.10
+            ) / 0.50 * 100
+            return max(0.0, min(100.0, total))
+        return None
+
+    def is_attendance_eligible(self):
+        """Return True if the student meets the 85% attendance requirement.
+        Uses occurred_classes (classes actually held so far) as the denominator,
+        so a student who attended every class to date is never wrongly flagged.
+        At the end of the semester occurred_classes ≈ total_classes.
+        """
+        if self.occurred_classes == 0:
+            return True
+        pct = (self.attended_classes / self.occurred_classes) * 100
+        return pct >= 85.0
+
+    def get_occurred_attendance_percentage(self) -> float:
+        """Attendance % out of occurred (held) classes — used for real-time display."""
+        if self.occurred_classes == 0:
+            return 0.0
+        return min((self.attended_classes / self.occurred_classes) * 100, 100.0)
+
+    @staticmethod
+    def _percentage_to_grade_point(pct: float) -> float:
+        """Map a percentage mark to a GPA grade point using the official table."""
+        if pct >= 80:  return 4.00  # A+
+        if pct >= 75:  return 3.75  # A
+        if pct >= 70:  return 3.50  # A-
+        if pct >= 65:  return 3.25  # B+
+        if pct >= 60:  return 3.00  # B
+        if pct >= 55:  return 2.75  # B-
+        if pct >= 50:  return 2.50  # C+
+        if pct >= 45:  return 2.25  # C
+        if pct >= 40:  return 2.00  # D
+        return 0.00                 # F
+
+    @staticmethod
+    def _percentage_to_letter(pct: float) -> str:
+        """Map a percentage mark to a letter grade string."""
+        if pct >= 80:  return "A+"
+        if pct >= 75:  return "A"
+        if pct >= 70:  return "A-"
+        if pct >= 65:  return "B+"
+        if pct >= 60:  return "B"
+        if pct >= 55:  return "B-"
+        if pct >= 50:  return "C+"
+        if pct >= 45:  return "C"
+        if pct >= 40:  return "D"
+        return "F"
 
     def calculate_grade(self):
-        total = self.calculate_total_marks()
-
-        if total is None:
+        """Compute grade point from final percentage. Returns None if incomplete."""
+        pct = self.calculate_total_marks()
+        if pct is None:
             return None
-
-        percentage = total / self.credits
-
-        if percentage >= 80:
-            self.grade_point = 4.0
-        elif percentage >= 70:
-            self.grade_point = 3.7
-        elif percentage >= 60:
-            self.grade_point = 3.0
-        elif percentage >= 50:
-            self.grade_point = 2.0
-        elif percentage >= 40:
-            self.grade_point = 1.0
-        else:
-            self.grade_point = 0.0
-
+        self.grade_point = self._percentage_to_grade_point(pct)
         return self.grade_point
+
+    def get_letter_grade(self) -> str:
+        """Return letter grade (A+, A, …, F) or '—' if not ready."""
+        pct = self.calculate_total_marks()
+        if pct is None:
+            return "—"
+        return self._percentage_to_letter(pct)
 
 
     def display_info(self):
@@ -315,7 +391,9 @@ class Course:
         print(f"Type: {self.course_type}")
         print(f"Credits: {self.credits}")
         print(f"Knowledge: {self.knowledge:.2f}")
-        print(f"Total Marks: {self.calculate_total_marks()}")
+        pct = self.calculate_total_marks()
+        print(f"Total Marks: {pct:.1f}%" if pct is not None else "Total Marks: N/A")
+        print(f"Letter Grade: {self.get_letter_grade()}")
         print(f"Grade Point: {self.grade_point}")
 
 

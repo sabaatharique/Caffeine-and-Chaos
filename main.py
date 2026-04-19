@@ -9,7 +9,8 @@ from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
                 QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
                 QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox)
-from screens import main_menu, game_screen, day_end_screen, save_prompt_screen, exam_screen, semester_end_screen
+from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
+                     exam_screen, midterm_results_screen, semester_end_screen)
 from savegame import save_game, load_game, delete_save, save_exists
 
 # Window & clock
@@ -329,8 +330,6 @@ class WeekReplayRunner:
         for w in range(start_week + 1, start_week + n_weeks + 1):
             self.course_manager.reset_quizzes_for_week(w)
 
-        self._start_new_day()
-
     #  helpers
     def _start_new_day(self):
         self.current_day   += 1
@@ -600,9 +599,14 @@ SETUP_SCREEN = "setup_screen"
 GAME_SCREEN = "game_screen"
 DAY_END_SCREEN = "day_end_screen"
 EXAM_SCREEN = "exam_screen"
+MIDTERM_RESULTS_SCREEN = "midterm_results_screen"
 SEMESTER_END_SCREEN = "semester_end_screen"
 SAVE_PROMPT = "save_prompt"
 current_screen_state = MAIN_MENU
+
+# Scroll state for results pages
+_results_scroll_y = 0.0
+_results_content_h = 0
 
 # Semester tracking
 exam_type = "mid"   # "mid" or "final"
@@ -837,6 +841,14 @@ while running:
                 running = False
             else:
                 current_screen_state = SAVE_PROMPT
+
+        # Mouse-wheel scrolling for results screens
+        if event.type == pygame.MOUSEWHEEL:
+            if current_screen_state in (MIDTERM_RESULTS_SCREEN, SEMESTER_END_SCREEN):
+                _results_scroll_y -= event.y * 28
+                _results_scroll_y = max(0.0, min(_results_scroll_y,
+                                                  max(0.0, _results_content_h - HEIGHT + 120)))
+
 
         # Quiz & Lab result box dismissal
         if quiz_result_box.handle_event(event):
@@ -1309,7 +1321,9 @@ while running:
                     if assessments:
                         week_replay_runner.quiz_week_pending = True
                         week_replay_runner.msgs.append(f"Week {week_replay_runner.current_week} begins but has assessments scheduled.")
+                        quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
                     else:
+                        week_replay_runner._start_new_day()
                         week_replay_runner.msgs.append(f"Week {week_replay_runner.current_week} begins (fast-forward).")
                     messages = []
 
@@ -1402,23 +1416,43 @@ while running:
         elif current_screen_state == EXAM_SCREEN:
             if exam_continue_btn.clicked(event):
                 if exam_type == "final":
+                    # Apply 85% attendance rule: barred students get 0 on finals
                     for c in course_manager.courses:
                         if c.course_type == "Theory":
-                            c.generate_final_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
+                            if not c.is_attendance_eligible():
+                                c.final_mark = 0
+                            else:
+                                c.generate_final_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
+                        elif c.course_type == "Lab":
+                            if not c.is_attendance_eligible():
+                                c.lab_final = 0
+                            else:
+                                c.generate_lab_final(week_count, student.stress, student.health, student.is_sick)
+                    _results_scroll_y = 0.0
                     current_screen_state = SEMESTER_END_SCREEN
                 else:
-                    # Mid exam done → resume game at current day (week 8 day 1)
+                    # Mid exam done → generate mid marks then show midterm results
                     for c in course_manager.courses:
                         if c.course_type == "Theory":
                             c.generate_mid_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
-                    day_over = False
-                    current_game_bg = bg_map['default']
-                    daily_outages = wifi_failure_event()
-                    todays_classes.clear()
-                    _classes_resolved.clear()
-                    class_interrupt_box.attend_all = False
-                    _lab_assessments_resolved_today.clear()
-                    current_screen_state = GAME_SCREEN
+                        elif c.course_type == "Lab":
+                            c.generate_lab_mid(week_count, student.stress, student.health, student.is_sick)
+                    _results_scroll_y = 0.0
+                    current_screen_state = MIDTERM_RESULTS_SCREEN
+
+        # Midterm Results Screen
+        elif current_screen_state == MIDTERM_RESULTS_SCREEN:
+            if exam_continue_btn.clicked(event):
+                # Return to game for the post-midterm half
+                day_over = False
+                current_game_bg = bg_map['default']
+                daily_outages = wifi_failure_event()
+                todays_classes.clear()
+                _classes_resolved.clear()
+                _quizzes_resolved_today.clear()
+                _lab_assessments_resolved_today.clear()
+                class_interrupt_box.attend_all = False
+                current_screen_state = GAME_SCREEN
 
         # Semester End Screen
         elif current_screen_state == SEMESTER_END_SCREEN:
@@ -1664,11 +1698,20 @@ while running:
         lab_assessment_interrupt_box.draw(screen)  # replay lab Take/Skip prompt
 
     elif current_screen_state == EXAM_SCREEN:
-        exam_screen(screen, exam_type, exam_continue_btn, message_font)
+        exam_screen(screen, exam_type, exam_continue_btn, message_font,
+                    course_manager=course_manager)
+
+    elif current_screen_state == MIDTERM_RESULTS_SCREEN:
+        avg_k = course_manager.get_average_knowledge()
+        _results_content_h = midterm_results_screen(
+            screen, course_manager, exam_continue_btn,
+            scroll_y=_results_scroll_y)
 
     elif current_screen_state == SEMESTER_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
-        semester_end_screen(screen, student, avg_k, sem_quit_btn, message_font, course_manager)
+        _results_content_h = semester_end_screen(
+            screen, student, avg_k, sem_quit_btn, message_font,
+            course_manager, scroll_y=_results_scroll_y)
 
     pygame.display.flip()
 
