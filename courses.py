@@ -104,17 +104,20 @@ class Course:
                 la["attempt"] += 1
 
     # THEORY SECTION 
-    def generate_quiz_mark(self, stress=0, sleep=1.0, health=100):
+    def generate_quiz_mark(self, week, stress=0, sleep=1.0, health=100):
         if self.course_type != "Theory":
-            return
+            return None
 
         if len(self.quiz_marks) >= 4:
-            return
+            return None
 
         randomness = random.uniform(-10, 10)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.65 * self.knowledge +
+            0.65 * (progress * 100) +
             0.15 * (sleep * 100) +
             0.15 * health -
             0.25 * stress
@@ -122,102 +125,123 @@ class Course:
 
         mark = max(0, min(100, base + randomness))
         self.quiz_marks.append(mark)
+        return mark
 
 
-    def generate_mid_mark(self, stress=0, sleep=1.0, health=100, is_sick=False):
+    def generate_mid_mark(self, week, stress=0, sleep=1.0, health=100, is_sick=False):
         if self.course_type != "Theory":
-            return
+            return None
             
         if is_sick:
             self.mid_mark = 0
-            return
+            return 0
 
         randomness = random.uniform(-8, 8)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.7 * self.knowledge +
+            0.7 * (progress * 100) +
             0.15 * (sleep * 100) +
             0.15 * health -
             0.2 * stress
         )
 
         self.mid_mark = max(0, min(100, base + randomness))
+        return self.mid_mark
 
 
-    def generate_final_mark(self, stress=0, sleep=1.0, health=100, is_sick=False):
+    def generate_final_mark(self, week, stress=0, sleep=1.0, health=100, is_sick=False):
         if self.course_type != "Theory":
-            return
+            return None
             
         if is_sick:
             self.final_mark = 0
-            return
+            return 0
 
         randomness = random.uniform(-5, 5)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.75 * self.knowledge +
+            0.75 * (progress * 100) +
             0.1 * (sleep * 100) +
             0.15 * health -
             0.2 * stress
         )
 
         self.final_mark = max(0, min(100, base + randomness))
+        return self.final_mark
 
     # LAB SECTION
-    def generate_lab_evaluation(self, stress=0, health=100):
+    def generate_lab_evaluation(self, week, stress=0, health=100):
 
         if self.course_type != "Lab":
-            return
+            return None
 
         if len(self.lab_evaluations) >= self.max_lab_evaluations:
-            return
+            return None
 
         randomness = random.uniform(-5, 5)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.6 * self.knowledge +
+            0.6 * (progress * 100) +
             0.2 * health -
             0.3 * stress
         )
 
         mark = max(0, min(100, base + randomness))
         self.lab_evaluations.append(mark)
+        return mark
 
-    def generate_lab_mid(self, stress=0, health=100, is_sick=False):
+    def generate_lab_mid(self, week, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
-            return
+            return None
             
         if is_sick:
             self.lab_mid = 0
-            return
+            return 0
 
         randomness = random.uniform(-5, 5)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.7 * self.knowledge +
+            0.7 * (progress * 100) +
             0.2 * health -
             0.2 * stress
         )
 
         self.lab_mid = max(0, min(100, base + randomness))
+        return self.lab_mid
 
-    def generate_lab_final(self, stress=0, health=100, is_sick=False):
+    def generate_lab_final(self, week, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
-            return
+            return None
             
         if is_sick:
             self.lab_final = 0
-            return
+            return 0
 
         randomness = random.uniform(-5, 5)
+        expected_knowledge = (self.occurred_classes / max(1, self.total_classes)) * 100.0
+        progress = self.knowledge / max(1.0, expected_knowledge)
+        progress = min(1.0, progress)
 
         base = (
-            0.75 * self.knowledge +
+            0.75 * (progress * 100) +
             0.2 * health -
             0.2 * stress
         )
 
         self.lab_final = max(0, min(100, base + randomness))
+        return self.lab_final
 
     def calculate_total_marks(self):
 
@@ -229,32 +253,34 @@ class Course:
                 return None
 
             best_quizzes = sorted(self.quiz_marks, reverse=True)[:3]
-            quiz_avg = sum(best_quizzes) / 3
+            quiz_avg = sum(best_quizzes) / len(best_quizzes) if best_quizzes else 0
 
-            total = (
-                quiz_avg * 0.2 +
-                self.mid_mark * 0.3 +
-                self.final_mark * 0.5
+            total_percentage = (
+                quiz_avg * 0.15 +
+                self.mid_mark * 0.25 +
+                self.final_mark * 0.50 +
+                self.get_attendance_percentage() * 0.10
             )
 
-            return total
+            return total_percentage * self.credits
 
         #  LAB 
         elif self.course_type == "Lab":
-            if len(self.lab_evaluations) == 0 or \
+            if (self.max_lab_evaluations > 0 and len(self.lab_evaluations) == 0) or \
                self.lab_mid is None or \
                self.lab_final is None:
                 return None
 
-            evaluation_avg = sum(self.lab_evaluations) / len(self.lab_evaluations)
+            evaluation_avg = sum(self.lab_evaluations) / len(self.lab_evaluations) if self.lab_evaluations else 0
 
-            total = (
-                evaluation_avg * 0.4 +
+            total_percentage = (
+                evaluation_avg * 0.15 +
                 self.lab_mid * 0.25 +
-                self.lab_final * 0.35
+                self.lab_final * 0.50 +
+                self.get_attendance_percentage() * 0.10
             )
 
-            return total
+            return total_percentage * self.credits
 
     def calculate_grade(self):
         total = self.calculate_total_marks()
@@ -262,15 +288,17 @@ class Course:
         if total is None:
             return None
 
-        if total >= 80:
+        percentage = total / self.credits
+
+        if percentage >= 80:
             self.grade_point = 4.0
-        elif total >= 70:
+        elif percentage >= 70:
             self.grade_point = 3.7
-        elif total >= 60:
+        elif percentage >= 60:
             self.grade_point = 3.0
-        elif total >= 50:
+        elif percentage >= 50:
             self.grade_point = 2.0
-        elif total >= 40:
+        elif percentage >= 40:
             self.grade_point = 1.0
         else:
             self.grade_point = 0.0
@@ -303,18 +331,18 @@ class CourseManager:
         self.courses = []
 
         for c in result.get("courses", []):
-            # Weekly theory: ~3 classes/week × 16 weeks = 48 total
+            # Weekly theory: ~3 classes/week × 15 weeks = 45 total
             self.add_course(
                 name=c["name"],
                 credits=c["credits"],
                 course_type="Theory",
-                total_classes=48,
+                total_classes=45,
                 schedule="weekly",
             )
 
         for lab in result.get("labs", []):
-            # Weekly lab: 1/week × 16 = 16; biweekly: 1/2-weeks × 16 = 8
-            classes = 16 if lab["schedule"] == "weekly" else 8
+            # Weekly lab: 1/week × 15 = 15; biweekly: 1/2-weeks × 15 = 8
+            classes = 15 if lab["schedule"] == "weekly" else 8
             self.add_course(
                 name=lab["name"],
                 credits=lab["credits"],
@@ -369,13 +397,13 @@ class CourseManager:
         # Recalculate total_classes based on assigned slots
         for c in self.courses:
             c.weekly_slots.sort()
-            multiplier = 16 if c.schedule == "weekly" else 8
+            multiplier = 15 if c.schedule == "weekly" else 8
             c.total_classes = len(c.weekly_slots) * multiplier
             # Sync lab evaluation targets for lab courses
             if c.course_type == "Lab":
                 c.max_lab_evaluations = c.total_classes
 
-    # ── Quiz scheduling 
+    # Quiz scheduling 
 
     # Weighted probability per week for each quiz window.
     # Index 0 = first week of the window.

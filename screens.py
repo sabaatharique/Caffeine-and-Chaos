@@ -248,7 +248,7 @@ def exam_screen(screen, exam_type, continue_btn, font):
     continue_btn.draw(screen)
 
 
-def semester_end_screen(screen, student, avg_knowledge, quit_btn, font):
+def semester_end_screen(screen, student, avg_knowledge, quit_btn, font, course_manager):
     """Shown after the final exam — semester complete!"""
     WIDTH, HEIGHT = screen.get_width(), screen.get_height()
 
@@ -269,7 +269,7 @@ def semester_end_screen(screen, student, avg_knowledge, quit_btn, font):
     detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
 
     # Card
-    card_w, card_h = 580, 340
+    card_w, card_h = 580, 400
     card_x = (WIDTH - card_w) // 2
     card_y = (HEIGHT - card_h) // 2 - 20
     card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
@@ -289,24 +289,32 @@ def semester_end_screen(screen, student, avg_knowledge, quit_btn, font):
 
     # Stat summary
     pygame.draw.line(screen, (40, 120, 60),
-                     (card_x + 50, card_y + 162), (card_x + card_w - 50, card_y + 162), 1)
+                     (card_x + 50, card_y + 110), (card_x + card_w - 50, card_y + 110), 1)
 
-    stats = [
-        ("Knowledge",   f"{avg_knowledge:.1f} / 100",  (120, 220, 255)),
-        ("Health",      f"{student.health:.1f} / 100", (255, 140, 140)),
-        ("Stress",      f"{student.stress:.1f} / 100", (255, 200,  80)),
-        ("Motivation",  f"{student.motivation:.1f} / 100", (160, 255, 160)),
-    ]
-    col_x = [card_x + 60, card_x + 60 + (card_w - 120) // 2]
-    for i, (label, value, color) in enumerate(stats):
-        cx = col_x[i % 2]
-        cy = card_y + 174 + (i // 2) * 38
-        lbl_surf = stat_font.render(f"{label}:", True, (160, 200, 160))
-        val_surf = stat_font.render(value, True, color)
-        screen.blit(lbl_surf, (cx, cy))
-        screen.blit(val_surf, (cx + 130, cy))
+    cy = card_y + 120
+    for c in course_manager.courses:
+        grade = c.calculate_grade()
+        marks = c.calculate_total_marks()
+        marks_str = f"{marks:.1f}" if marks is not None else "N/A"
+        grade_str = f"{grade:.1f}" if grade is not None else "F"
+        lbl_surf = stat_font.render(f"{c.name}:", True, (160, 200, 160))
+        val_surf = stat_font.render(f"{marks_str} Marks -> GP {grade_str}", True, (255, 200, 100))
+        screen.blit(lbl_surf, (card_x + 60, cy))
+        screen.blit(val_surf, (card_x + 300, cy))
+        cy += 28
+
+    cy += 10
+    pygame.draw.line(screen, (40, 120, 60),
+                     (card_x + 50, cy), (card_x + card_w - 50, cy), 1)
+    cy += 10
+
+    cgpa = course_manager.calculate_cgpa()
+    lbl_surf = stat_font.render("Overall CGPA:", True, (200, 255, 200))
+    val_surf = title_font.render(f"{cgpa:.2f}", True, (120, 255, 120))
+    screen.blit(lbl_surf, (card_x + 80, cy + 10))
+    screen.blit(val_surf, (card_x + 300, cy - 5))
 
     hint_surf = detail_font.render("Thanks for playing Caffeine & Chaos!", True, (100, 160, 100))
-    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + 296))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + card_h - 40))
 
     quit_btn.draw(screen)

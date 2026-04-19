@@ -206,7 +206,7 @@ class Student:
         messages.extend(self.clamp())
         return messages
 
-    def attend_class(self, course, avg_knowledge=0.0):
+    def attend_class(self, course, week, avg_knowledge=0.0):
         messages = []
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
@@ -222,12 +222,20 @@ class Student:
 
         course.attended_classes += 1
         self.attendance += 1
-        course.add_knowledge(self.class_knowledge_rate)
+        knowledge_gain = (75.0 / max(1, course.total_classes)) * self.type_mult
+        course.add_knowledge(knowledge_gain)
+        
+        # Periodic lab evaluation (e.g. every 3rd class)
+        if course.course_type == "Lab" and course.attended_classes % 3 == 0:
+            eval_mark = course.generate_lab_evaluation(week, self.stress, self.health)
+            if eval_mark is not None:
+                messages.append(f"Instructor evaluated your lab work: scored {eval_mark:.1f}/100.")
+
         self.sleep -= self.class_sleep_loss
         self.stress += self.class_stress_rate
         self.motivation += 3
 
-        messages.append(f"Attended {course.name}: +{self.class_knowledge_rate:.1f} knowledge, -{self.class_sleep_loss:.1f} sleep, +{self.class_stress_rate:.1f} stress.")
+        messages.append(f"Attended {course.name}: +{knowledge_gain:.1f} knowledge, -{self.class_sleep_loss:.1f} sleep, +{self.class_stress_rate:.1f} stress.")
         messages.extend(self.clamp())
         return messages
 

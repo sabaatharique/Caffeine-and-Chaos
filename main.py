@@ -8,7 +8,7 @@ from environment import DAY_START, DAY_END, format_time, draw_clock, outage_over
 from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
                 QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
-                QuizInterruptBox, LabAssessmentInterruptBox)
+                QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox)
 from screens import main_menu, game_screen, day_end_screen, save_prompt_screen, exam_screen, semester_end_screen
 from savegame import save_game, load_game, delete_save, save_exists
 
@@ -208,7 +208,7 @@ class ReplayRunner:
             else:
                 _actual = None  # no classes on weekends
             if _actual:
-                new_msgs.extend(self.student.attend_class(_actual))
+                new_msgs.extend(self.student.attend_class(_actual, _week))
 
         # Silent Class Resolution (for missed/auto-attended classes during replay)
         # Runs for ALL action types. For 'attend_class' the directly-attended course
@@ -221,7 +221,7 @@ class ReplayRunner:
                     continue  # already handled above
                 if action_start < e <= action_end:
                     if class_interrupt_box.attend_all:
-                        new_msgs.extend(self.student.attend_class(c))
+                        new_msgs.extend(self.student.attend_class(c, _week))
                         new_msgs.append(f"Auto-attended {c.name} during replay.")
                     else:
                         c.occurred_classes += 1
@@ -518,7 +518,7 @@ class WeekReplayRunner:
             else:
                 _actual = None
             if _actual:
-                new_msgs.extend(self.student.attend_class(_actual))
+                new_msgs.extend(self.student.attend_class(_actual, _week))
 
         # Silent Class Resolution (for all classes during week replay)
         # Runs for ALL action types. Week repeat always attends all scheduled classes
@@ -532,7 +532,7 @@ class WeekReplayRunner:
                 if c is _directly_attended:
                     continue  # already handled above
                 if action_start < e <= action_end:
-                    new_msgs.extend(self.student.attend_class(c))
+                    new_msgs.extend(self.student.attend_class(c, _week))
                     new_msgs.append(f"Auto-attended {c.name} during week replay.")
 
         # Quiz interrupt — pause and let player decide
@@ -661,6 +661,7 @@ quiz_result_box = QuizResultBox(WIDTH, HEIGHT)
 quiz_week_prompt_box = QuizWeekPromptBox(alert_title_font, alert_body_font)
 quiz_interrupt_box = QuizInterruptBox(button_font, input_font)
 lab_assessment_interrupt_box = LabAssessmentInterruptBox(button_font, input_font)
+lab_assessment_result_box = LabAssessmentResultBox(WIDTH, HEIGHT)
 academic_dashboard = AcademicDashboard(
     WIDTH, HEIGHT,
     message_font,
@@ -837,9 +838,11 @@ while running:
             else:
                 current_screen_state = SAVE_PROMPT
 
-        # Quiz result box dismissal
+        # Quiz & Lab result box dismissal
         if quiz_result_box.handle_event(event):
             continue    # event consumed; don't pass to buttons below
+        if lab_assessment_result_box.handle_event(event):
+            continue
 
         # Academic dashboard expansion/collapse
         if academic_dashboard.handle_event(event):
@@ -938,7 +941,7 @@ while running:
                     _classes_resolved.add(p_start)
                     _pending_class = None
                     if class_result == "attend":
-                        new_msgs = student.attend_class(p_course)
+                        new_msgs = student.attend_class(p_course, week_count)
                         record_action('attend_class', 1.25, p_course)
                         # Jump clock to the actual end of the class period
                         time_of_day = max(time_of_day, p_end)
@@ -1030,9 +1033,16 @@ while running:
                             if la_result == "skip" or student.is_sick:
                                 la["missed"] = True
                                 messages.append(f"[LAB] {la_course.name} — {la_type.replace('_', ' ').title()} SKIPPED.")
+                                lab_assessment_result_box.open(la_course, missed=True, assessment_type=la_type.replace('_', ' ').title(), mark=0)
                             else:
                                 la["missed"] = False
-                                messages.append(f"[LAB] {la_course.name} — {la_type.replace('_', ' ').title()} taken.")
+                                if la_type == 'lab_mid':
+                                    mark = la_course.generate_lab_mid(week_count, student.stress, student.health)
+                                else:
+                                    mark = la_course.generate_lab_final(week_count, student.stress, student.health)
+                                la["mark"] = mark
+                                messages.append(f"[LAB] {la_course.name} — {la_type.replace('_', ' ').title()} taken. (Score: {mark:.1f})")
+                                lab_assessment_result_box.open(la_course, missed=False, assessment_type=la_type.replace('_', ' ').title(), mark=mark)
                             break
                     messages = messages[-5:]
 
@@ -1123,11 +1133,10 @@ while running:
                             quiz["missed"] = True
                             # mark stays None — result system will handle this in Phase 2
                             messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} MISSED (sick).")
-                            quiz_result_box.open(course, missed=True, quiz_number=quiz["quiz_number"])
                         else:
-                            # mark stays None — result system will handle this in Phase 2
-                            messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken.")
-                            quiz_result_box.open(course, missed=False, quiz_number=quiz["quiz_number"])
+                            mark = course.generate_quiz_mark(week_count, student.stress, student.sleep, student.health)
+                            quiz["mark"] = mark
+                            messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken. (Score: {mark:.1f})")
 
                         messages = messages[-5:]   # keep message list tidy
                         break   # only one quiz popup at a time
@@ -1196,8 +1205,13 @@ while running:
                             msg = f"[LAB] {course.name} — {atype} SKIPPED."
                         else:
                             la["missed"] = False
+                            if la["assessment_type"] == 'lab_mid':
+                                mark = course.generate_lab_mid(getattr(runner, 'current_week', ((runner.current_day - 1) // 7) + 1), runner.student.stress, runner.student.health)
+                            else:
+                                mark = course.generate_lab_final(getattr(runner, 'current_week', ((runner.current_day - 1) // 7) + 1), runner.student.stress, runner.student.health)
+                            la["mark"] = mark
                             atype = la["assessment_type"].replace("_", " ").title()
-                            msg = f"[LAB] {course.name} — {atype} taken."
+                            msg = f"[LAB] {course.name} — {atype} taken. (Score: {mark:.1f})"
                         runner.msgs.append(msg)
                         messages = runner.last_msgs()
                         runner.pending_lab_assessment = None
@@ -1217,7 +1231,9 @@ while running:
                             msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} SKIPPED."
                         else:
                             quiz["missed"] = False
-                            msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken."
+                            mark = course.generate_quiz_mark(getattr(runner, 'current_week', ((runner.current_day - 1) // 7) + 1), runner.student.stress, runner.student.sleep, runner.student.health)
+                            quiz["mark"] = mark
+                            msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} taken. (Score: {mark:.1f})"
                         runner.msgs.append(msg)
                         messages = runner.last_msgs()
                         runner.pending_quiz = None
@@ -1386,9 +1402,15 @@ while running:
         elif current_screen_state == EXAM_SCREEN:
             if exam_continue_btn.clicked(event):
                 if exam_type == "final":
+                    for c in course_manager.courses:
+                        if c.course_type == "Theory":
+                            c.generate_final_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
                     current_screen_state = SEMESTER_END_SCREEN
                 else:
                     # Mid exam done → resume game at current day (week 8 day 1)
+                    for c in course_manager.courses:
+                        if c.course_type == "Theory":
+                            c.generate_mid_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
                     day_over = False
                     current_game_bg = bg_map['default']
                     daily_outages = wifi_failure_event()
@@ -1536,7 +1558,7 @@ while running:
                 # Class is currently in session — prompt or auto-attend
                 if class_interrupt_box.attend_all:
                     _classes_resolved.add(start_h)
-                    new_msgs = student.attend_class(cls_course)
+                    new_msgs = student.attend_class(cls_course, week_count)
                     record_action('attend_class', 1.25, cls_course)
                     # Jump clock to the actual end of the class period
                     time_of_day = max(time_of_day, end_h)
@@ -1618,6 +1640,7 @@ while running:
         # Draw quiz result popup (topmost)
         quiz_result_box.draw(screen)
         lab_assessment_interrupt_box.draw(screen)
+        lab_assessment_result_box.draw(screen)
 
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
@@ -1645,7 +1668,7 @@ while running:
 
     elif current_screen_state == SEMESTER_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
-        semester_end_screen(screen, student, avg_k, sem_quit_btn, message_font)
+        semester_end_screen(screen, student, avg_k, sem_quit_btn, message_font, course_manager)
 
     pygame.display.flip()
 

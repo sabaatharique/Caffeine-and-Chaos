@@ -1664,10 +1664,11 @@ class QuizResultBox:
 
     # public API 
 
-    def open(self, course, missed: bool = False, quiz_number: int = 1):
+    def open(self, course, missed: bool = False, quiz_number: int = 1, mark: float = 0.0):
         self._course = course
         self._missed = missed
         self._quiz_number = quiz_number
+        self._mark = mark
         self.active  = True
         self._load_fonts()
 
@@ -1717,17 +1718,22 @@ class QuizResultBox:
         if self._missed:
             status_text = "Quiz Missed (sick or skipped)"
             status_color = (255, 100, 100)
-        else:
-            status_text = "Quiz Taken"
-            status_color = (180, 255, 180)
-        
-        status_surf = self._body_font.render(status_text, True, status_color)
-        screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
+            status_surf = self._body_font.render(status_text, True, status_color)
+            screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
 
-        # Note 
-        note_text = "Results will be announced later."
-        note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
-        screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
+            note_text = f"Mark: {self._mark:.1f}/100"
+            note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
+            screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
+        else:
+            status_text = f"Score: {self._mark:.1f}/100  ({self._grade_letter()})"
+            status_color = self._grade_color()
+            
+            status_surf = self._body_font.render(status_text, True, status_color)
+            screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
+
+            note_text = self._band_label()
+            note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
+            screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
 
         # dismiss hint 
         hint_surf = self._hint_font.render(
@@ -1762,6 +1768,69 @@ class QuizResultBox:
         if m >= 60: return "Average"
         if m >= 50: return "Passing"
         return "Failing"
+
+class LabAssessmentResultBox(QuizResultBox):
+    def open(self, course, missed: bool = False, assessment_type: str = "Lab Mid", mark: float = 0.0):
+        self._course = course
+        self._missed = missed
+        self._assessment_type = assessment_type
+        self._mark = mark
+        self.active  = True
+        self._load_fonts()
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        # dim the background 
+        overlay = pygame.Surface((self.screen_w, self.screen_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        screen.blit(overlay, (0, 0))
+
+        # card 
+        card_w, card_h = 420, 200
+        card_x = (self.screen_w - card_w) // 2
+        card_y = (self.screen_h - card_h) // 2
+
+        card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        card_surf.fill(self._CARD_BG)
+        screen.blit(card_surf, (card_x, card_y))
+        pygame.draw.rect(screen, (100, 100, 180), (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+        # Title 
+        title_text = f"{self._assessment_type} - {self._course.name}"
+        title_surf = self._title_font.render(title_text, True, self._TEXT_WHITE)
+        screen.blit(title_surf, (card_x + card_w // 2 - title_surf.get_width() // 2, card_y + 20))
+
+        pygame.draw.line(screen, (80, 80, 140), (card_x + 40, card_y + 60), (card_x + card_w - 40, card_y + 60), 1)
+
+        # Status 
+        if self._missed:
+            status_text = "Assessment Missed (sick or skipped)"
+            status_color = (255, 100, 100)
+            status_surf = self._body_font.render(status_text, True, status_color)
+            screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
+
+            note_text = f"Mark: {self._mark:.1f}/100"
+            note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
+            screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
+        else:
+            status_text = f"Score: {self._mark:.1f}/100  ({self._grade_letter()})"
+            status_color = self._grade_color()
+            
+            status_surf = self._body_font.render(status_text, True, status_color)
+            screen.blit(status_surf, (card_x + card_w // 2 - status_surf.get_width() // 2, card_y + 90))
+
+            note_text = self._band_label()
+            note_surf = self._hint_font.render(note_text, True, self._TEXT_SUBTEXT)
+            screen.blit(note_surf, (card_x + card_w // 2 - note_surf.get_width() // 2, card_y + 125))
+
+        # dismiss hint 
+        hint_surf = self._hint_font.render(
+            "[ Enter to continue ]", True, (130, 130, 170))
+        screen.blit(hint_surf,
+                    (card_x + card_w // 2 - hint_surf.get_width() // 2,
+                     card_y + card_h - 30))
 
 class QuizWeekPromptBox:
     """
@@ -2119,7 +2188,9 @@ class AcademicDashboard:
             y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
         else:
             for q in history:
-                status = "MISSED" if q["missed"] else "TAKEN"
+                mark = 0 if q["missed"] else q.get("mark", None)
+                mark_str = f" ({mark:.0f}%)" if isinstance(mark, (int, float)) else " (N/A)"
+                status = f"MISSED{mark_str}" if q["missed"] else f"TAKEN{mark_str}"
                 st_color = (255, 120, 120) if q["missed"] else (120, 255, 180)
                 
                 line_text = f"Quiz {q['quiz_number']} : {self._truncate(q['course_name'], 15)}"
@@ -2156,7 +2227,9 @@ class AcademicDashboard:
             y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
         else:
             for la in lab_history:
-                status = "MISSED" if la["missed"] else "TAKEN"
+                mark = 0 if la["missed"] else la.get("mark", None)
+                mark_str = f" ({mark:.0f}%)" if isinstance(mark, (int, float)) else " (N/A)"
+                status = f"MISSED{mark_str}" if la["missed"] else f"TAKEN{mark_str}"
                 st_color = (255, 120, 120) if la["missed"] else (120, 255, 180)
                 
                 atype = la["assessment_type"].replace('_', ' ').title()
