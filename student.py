@@ -42,7 +42,7 @@ class Student:
         self._RECOVERY_PROB      = 0.40   # 40% chance to recover each sick day (~2.5 day expected illness)
 
         # Action rates
-        self.study_knowledge_rate = 1 * type_mult
+        self.study_knowledge_rate = 0.8 * type_mult
         self.study_sleep_rate =  8    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   

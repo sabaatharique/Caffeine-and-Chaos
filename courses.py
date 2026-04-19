@@ -38,8 +38,12 @@ class Course:
 
 
     def add_knowledge(self, amount):
+        max_knowledge = 100.0
+        if self.total_classes > 0:
+            max_knowledge = max(0.0, min(100.0, (self.occurred_classes / self.total_classes) * 100.0))
+        
         self.knowledge += amount
-        self.knowledge = max(0, min(100, self.knowledge))
+        self.knowledge = max(0, min(max_knowledge, self.knowledge))
 
    
     def attend_class(self):
@@ -104,7 +108,7 @@ class Course:
                 la["attempt"] += 1
 
     # THEORY SECTION 
-    def generate_quiz_mark(self, week, stress=0, sleep=1.0, health=100):
+    def generate_quiz_mark(self, week, stress=0, sleep=100, health=100):
         if self.course_type != "Theory":
             return None
 
@@ -118,7 +122,7 @@ class Course:
 
         base = (
             0.65 * (progress * 100) +
-            0.15 * (sleep * 100) +
+            0.15 * sleep +
             0.15 * health -
             0.25 * stress
         )
@@ -128,7 +132,7 @@ class Course:
         return mark
 
 
-    def generate_mid_mark(self, week, stress=0, sleep=1.0, health=100, is_sick=False):
+    def generate_mid_mark(self, week, stress=0, sleep=100, health=100, is_sick=False):
         if self.course_type != "Theory":
             return None
             
@@ -143,7 +147,7 @@ class Course:
 
         base = (
             0.7 * (progress * 100) +
-            0.15 * (sleep * 100) +
+            0.15 * sleep +
             0.15 * health -
             0.2 * stress
         )
@@ -152,7 +156,7 @@ class Course:
         return self.mid_mark
 
 
-    def generate_final_mark(self, week, stress=0, sleep=1.0, health=100, is_sick=False):
+    def generate_final_mark(self, week, stress=0, sleep=100, health=100, is_sick=False):
         if self.course_type != "Theory":
             return None
             
@@ -167,7 +171,7 @@ class Course:
 
         base = (
             0.75 * (progress * 100) +
-            0.1 * (sleep * 100) +
+            0.1 * sleep +
             0.15 * health -
             0.2 * stress
         )
