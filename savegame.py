@@ -58,9 +58,10 @@ def _course_to_dict(course) -> dict:
         "lab_mid": course.lab_mid,
         "lab_final": course.lab_final,
         "grade_point": course.grade_point,
-        "weekly_slots": [list(s) for s in course.weekly_slots],
         "scheduled_quizzes": course.scheduled_quizzes,
+        "scheduled_lab_assessments": getattr(course, "scheduled_lab_assessments", []),
         "occurred_classes": course.occurred_classes,
+        "weekly_slots": getattr(course, "weekly_slots", []),
     }
 
 
@@ -87,6 +88,7 @@ def _courses_from_dict(data_list: list, course_manager):
         c.grade_point = d.get("grade_point", 0.0)
         c.weekly_slots = [tuple(s) for s in d.get("weekly_slots", [])]
         c.scheduled_quizzes = d.get("scheduled_quizzes", [])
+        c.scheduled_lab_assessments = d.get("scheduled_lab_assessments", [])
         # Migration guard for older saves
         for i, q in enumerate(c.scheduled_quizzes):
             if "quiz_number" not in q:

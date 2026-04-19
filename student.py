@@ -42,7 +42,7 @@ class Student:
         self._RECOVERY_PROB      = 0.40   # 40% chance to recover each sick day (~2.5 day expected illness)
 
         # Action rates
-        self.study_knowledge_rate = 1 * type_mult
+        self.study_knowledge_rate = 0.8 * type_mult
         self.study_sleep_rate =  8    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   
@@ -118,7 +118,7 @@ class Student:
         self.update_action_status()
         return messages
 
-    # ── Sickness helpers ────────────────────────────────────────────────────────
+    # Sickness helpers 
 
     def _record_daily_history(self):
         """Snapshot today's stress & health into rolling history."""
@@ -132,25 +132,18 @@ class Student:
 
     def _compute_sickness_prob(self) -> float:
         """Return today's Bernoulli probability of falling sick."""
-        if not self._stress_history:          # no history yet → baseline only
-            return self._SICKNESS_BASE_PROB
-
-        avg_stress = sum(self._stress_history) / len(self._stress_history)
-        avg_health = sum(self._health_history) / len(self._health_history)
-
-        stress_factor = 0.02 * (avg_stress / 100)
-        health_factor = 0.02 * (1 - avg_health / 100)
-
-        p = self._SICKNESS_BASE_PROB + stress_factor + health_factor
-        return min(p, self._SICKNESS_MAX_PROB)
+        import events
+        return events.compute_sickness_prob(
+            self._stress_history,
+            self._health_history,
+            self._SICKNESS_BASE_PROB,
+            self._SICKNESS_MAX_PROB
+        )
 
     def _generate_sick_duration(self) -> int:
         """Sample illness duration from a geometric distribution."""
-        days = 0
-        while True:
-            days += 1
-            if random.random() < self._RECOVERY_PROB:
-                return days
+        import events
+        return events.generate_sick_duration(self._RECOVERY_PROB)
 
     @property
     def sick_active(self) -> bool:
@@ -205,16 +198,15 @@ class Student:
                 self.health -= 10
                 self.stress += 10
                 if exhausted:
-                    messages.append("[SICK!] Your health hit zero! You've collapsed from exhaustion.")
+                    messages.append(f"[SICK!] Your health hit zero! You've collapsed from exhaustion.\nSick for {self.sick_days_remaining} days.")
                 else:
-                    messages.append("[SICK!] You've fallen ill! Health -10, Stress +10.")
+                    messages.append(f"[SICK!] You've fallen ill for {self.sick_days_remaining} days!\nHealth -10, Stress +10.")
                 messages.append("[SICK!] Study efficiency halved. Classes will be missed.")
-        # ── END sickness block ────────────────────────────────────────────────
 
         messages.extend(self.clamp())
         return messages
 
-    def attend_class(self, course, avg_knowledge=0.0):
+    def attend_class(self, course, week, avg_knowledge=0.0):
         messages = []
         if not self.action_status['attend_class']:
             messages.append("You are too tired to attend class.")
@@ -230,12 +222,20 @@ class Student:
 
         course.attended_classes += 1
         self.attendance += 1
-        course.add_knowledge(self.class_knowledge_rate)
+        knowledge_gain = (75.0 / max(1, course.total_classes)) * self.type_mult
+        course.add_knowledge(knowledge_gain)
+        
+        # Periodic lab evaluation (e.g. every 3rd class)
+        if course.course_type == "Lab" and course.attended_classes % 3 == 0:
+            eval_mark = course.generate_lab_evaluation(week, self.stress, self.health)
+            if eval_mark is not None:
+                messages.append(f"Instructor evaluated your lab work: scored {eval_mark:.1f}/100.")
+
         self.sleep -= self.class_sleep_loss
         self.stress += self.class_stress_rate
         self.motivation += 3
 
-        messages.append(f"Attended {course.name}. Knowledge +{self.class_knowledge_rate}.")
+        messages.append(f"Attended {course.name}: +{knowledge_gain:.1f} knowledge, -{self.class_sleep_loss:.1f} sleep, +{self.class_stress_rate:.1f} stress.")
         messages.extend(self.clamp())
         return messages
 
@@ -261,6 +261,8 @@ class Student:
         if wifi_penalty:
             self.stress += hours * self.wifi_stress_penalty
         self.health -= hours * self.study_health_rate
+        
+        messages.append(f"Studied {course.name} ({hours:.1f}h): +{gain:.1f} knowledge, -{hours * self.study_sleep_rate:.1f} sleep, +{hours * self.study_stress_rate:.1f} stress.")
 
         messages.extend(self.clamp())
         # If studying drained health to 0, trigger immediate sickness
@@ -275,6 +277,8 @@ class Student:
         self.sleep += hours * self.rest_sleep_rate
         self.stress -= hours * self.rest_stress_rate
         self.health += hours * self.rest_health_rate
+        
+        messages.append(f"Slept ({hours:.1f}h): +{hours*self.rest_sleep_rate:.1f} sleep, -{hours*self.rest_stress_rate:.1f} stress.")
 
         messages.extend(self.clamp())
         return messages
@@ -310,6 +314,7 @@ class Student:
         self.stress -= self.eat_stress_reduction
         self.hours_since_last_meal = 0.0  # reset hunger timer
 
+        messages.append(f"Ate a meal: -{self.eat_hunger_reduction:.1f} hunger, +{self.eat_health_gain:.1f} health.")
         messages.extend(self.clamp())
         return messages
 
@@ -325,6 +330,7 @@ class Student:
         self.health -= self.coffee_health_loss
         self.stress += self.coffee_stress_gain
 
+        messages.append(f"Drank coffee: +{self.coffee_sleep_gain:.1f} sleep, +{self.coffee_stress_gain:.1f} stress.")
         messages.extend(self.clamp())
         return messages
 
@@ -335,6 +341,7 @@ class Student:
         self.motivation += hours * self.relax_motivation_rate
         self.health += hours * self.relax_health_rate   # relaxing restores health
 
+        messages.append(f"Relaxed ({hours:.1f}h): -{hours*self.relax_stress_rate:.1f} stress, -{hours*self.relax_sleep_rate:.1f} sleep.")
         messages.extend(self.clamp())
         return messages
 
