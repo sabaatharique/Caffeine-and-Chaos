@@ -35,6 +35,18 @@ def _student_to_dict(student) -> dict:
         "sick_days_remaining": student.sick_days_remaining,
         "stress_history": student._stress_history,
         "health_history": student._health_history,
+        "week_stress_snapshots":     student._week_stress_snapshots,
+        "week_health_snapshots":     student._week_health_snapshots,
+        "week_motivation_snapshots": student._week_motivation_snapshots,
+        "week_study_hours":          student._week_study_hours,
+        "week_sleep_hours":          student._week_sleep_hours,
+        "week_relax_hours":          student._week_relax_hours,
+        "week_class_hours":          student._week_class_hours,
+        "today_study_hours":         student._today_study_hours,
+        "today_sleep_hours":         student._today_sleep_hours,
+        "today_relax_hours":         student._today_relax_hours,
+        "today_class_hours":         student._today_class_hours,
+        "snapshot_week":             student._snapshot_week,
         "stats": student.stats,
     }
 
@@ -56,6 +68,18 @@ def _student_from_dict(data: dict, student):
     student.sick_days_remaining = data.get("sick_days_remaining", 0)
     student._stress_history     = data.get("stress_history", [])
     student._health_history     = data.get("health_history", [])
+    student._week_stress_snapshots     = data.get("week_stress_snapshots", [])
+    student._week_health_snapshots     = data.get("week_health_snapshots", [])
+    student._week_motivation_snapshots = data.get("week_motivation_snapshots", [])
+    student._week_study_hours          = data.get("week_study_hours", [])
+    student._week_sleep_hours          = data.get("week_sleep_hours", [])
+    student._week_relax_hours          = data.get("week_relax_hours", [])
+    student._week_class_hours          = data.get("week_class_hours", [])
+    student._today_study_hours         = data.get("today_study_hours", 0.0)
+    student._today_sleep_hours         = data.get("today_sleep_hours", 0.0)
+    student._today_relax_hours         = data.get("today_relax_hours", 0.0)
+    student._today_class_hours         = data.get("today_class_hours", 0.0)
+    student._snapshot_week             = data.get("snapshot_week", 0)
     # Merge saved stats with defaults so old saves load without KeyError
     saved_stats = data.get("stats", {})
     student.stats = {**_default_stats(), **saved_stats}
@@ -156,7 +180,8 @@ def save_game(student, course_manager,
               exam_period_type: str = "",
               exam_idx: int = 0,
               exam_copy_to_all: bool = False,
-              exam_prep_actions: list = None) -> bool:
+              exam_prep_actions: list = None,
+              pre_mid_week_template: list = None) -> bool:
     """
     Write all game state to SAVE_FILE.
     Returns True on success, False on error.
@@ -184,6 +209,7 @@ def save_game(student, course_manager,
         "exam_idx":         exam_idx,
         "exam_copy_to_all": exam_copy_to_all,
         "exam_prep_actions": _actions_to_serialisable(exam_prep_actions or []),
+        "pre_mid_week_template": [ [_actions_to_serialisable(day) for day in week] for week in (pre_mid_week_template or []) ],
     }
     try:
         with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -230,6 +256,10 @@ def load_game(student, course_manager) -> dict | None:
             for s in data.get("final_schedule", []) if s["course_name"] in name_map
         ]
         exam_prep_actions = _actions_from_serialisable(data.get("exam_prep_actions", []), course_manager)
+        pre_mid_week_template = [
+            [ _actions_from_serialisable(day, course_manager) for day in week ]
+            for week in data.get("pre_mid_week_template", [])
+        ]
 
         return {
             "time_of_day": data.get("time_of_day", 8.0),
@@ -247,6 +277,7 @@ def load_game(student, course_manager) -> dict | None:
             "exam_idx": data.get("exam_idx", 0),
             "exam_copy_to_all": data.get("exam_copy_to_all", False),
             "exam_prep_actions": exam_prep_actions,
+            "pre_mid_week_template": pre_mid_week_template,
         }
     except Exception as e:
         print(f"[SaveGame] Failed to load: {e}")

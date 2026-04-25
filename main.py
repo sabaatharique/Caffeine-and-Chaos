@@ -12,7 +12,7 @@ from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 Checkbox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
                      exam_screen, midterm_results_screen, semester_end_screen,
-                     semester_stats_screen,
+                     semester_stats_screen, post_mid_choice_screen,
                      exam_schedule_screen, exam_prep_screen,
                      exam_taking_screen)
 from environment import MIDTERM_EXAM_WEEKS, FINAL_EXAM_WEEKS
@@ -38,6 +38,7 @@ sick_active    = False   # True while student is sick
 week_count = 1 # current week number (starts at 1)
 day_in_week = 1 # day within the current week (1-7)
 week_actions: list[list] = [] # accumulated per-day action lists for current week
+_pre_mid_week_template: list[list] = [] # snapshots of weeks 1-7 (Feature 1)
 _current_day_actions_snapshot: list = [] # snapshot of day_actions at week-day start
 
 print(f"Time of day: {format_time(time_of_day)}")
@@ -629,6 +630,7 @@ EXAM_TAKING_SCREEN = "exam_taking_screen"
 MIDTERM_RESULTS_SCREEN = "midterm_results_screen"
 SEMESTER_END_SCREEN = "semester_end_screen"
 SAVE_PROMPT = "save_prompt"
+POST_MID_CHOICE_SCREEN = "post_mid_choice_screen"
 current_screen_state = MAIN_MENU
 
 # Scroll state for results pages
@@ -762,6 +764,10 @@ skip_exam_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 160, 120, 40, "Skip (0)", 
 sem_quit_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
 sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats >",   button_font)
 sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "< Results", button_font)
+
+# Post-Mid Choice buttons (Feature 1)
+post_mid_repeat_btn = Button(WIDTH // 2 - 190, HEIGHT // 2 + 60, 180, 45, "Repeat Lifestyle", button_font)
+post_mid_manual_btn = Button(WIDTH // 2 + 10, HEIGHT // 2 + 60, 180, 45, "Play Manually", button_font)
 
 # Save-prompt buttons (shown in the SAVE_PROMPT overlay)
 _sp_y = HEIGHT // 2 + 20
@@ -1056,6 +1062,7 @@ while running:
                     exam_idx=_exam_idx,
                     exam_copy_to_all=_exam_copy_to_all,
                     exam_prep_actions=_exam_prep_actions,
+                    pre_mid_template=_pre_mid_week_template
                 )
                 running = False
             if save_no_btn.clicked(event):
@@ -1099,6 +1106,7 @@ while running:
                     _exam_idx = loaded.get("exam_idx", 0)
                     _exam_copy_to_all = loaded.get("exam_copy_to_all", False)
                     _exam_prep_actions[:] = loaded.get("exam_prep_actions", [])
+                    _pre_mid_week_template[:] = loaded.get("pre_mid_template", [])
                     copy_all_checkbox.checked = _exam_copy_to_all
                     # Reconstruct _exam_schedule from course_manager
                     if _exam_period_type == "mid":
@@ -1579,6 +1587,12 @@ while running:
                         _exam_prep_actions[:] = list(day_actions)
                     # Save or reset week_actions based on current day
                     if day_in_week == 7:      # completed last day of the week
+                        # Feature 1: Keep a copy of weeks 1-7 for the "Post-Mid Repeat" template
+                        if week_count <= 7:
+                            _full_week = list(week_actions) + [list(day_actions)]
+                            _pre_mid_week_template.append(_full_week)
+
+                        student.reset_week_snapshots()  # Reset trends for the new week
                         week_actions.clear()  # fresh start for next week
                     else:
                         week_actions.append(list(day_actions))  # save for week replay
@@ -1785,7 +1799,31 @@ while running:
         # Midterm Results Screen
         elif current_screen_state == MIDTERM_RESULTS_SCREEN:
             if exam_continue_btn.clicked(event):
-                # Return to game for the post-midterm half — resume at Monday morning, Week 8
+                current_screen_state = POST_MID_CHOICE_SCREEN
+
+        # Post-Mid Choice Screen (Feature 1)
+        elif current_screen_state == POST_MID_CHOICE_SCREEN:
+            if post_mid_repeat_btn.clicked(event):
+                # Use the most recent week (Week 7) as the template.
+                _style = _pre_mid_week_template[-1] if _pre_mid_week_template else []
+                
+                week_replay_runner = WeekReplayRunner(
+                    student, course_manager, _style, 15 - 8 + 1,
+                    49, 7 # Starts at end of Day 49 (Week 7 Sunday), week 7
+                )
+                week_replay_runner._start_new_day()
+                
+                day_count = week_replay_runner.current_day
+                week_count = week_replay_runner.current_week
+                time_of_day = week_replay_runner.time_cursor
+                
+                _exam_period_type = ""
+                _exam_idx = 0
+                _exam_schedule.clear()
+                messages = ["Post-midterm lifestyle repeat initiated!"]
+                current_screen_state = DAY_END_SCREEN
+
+            if post_mid_manual_btn.clicked(event):
                 day_count = 50       # Day 50 = Week 8 Monday
                 time_of_day = 8.0    # 8:00 AM
                 day_over = False
@@ -1796,10 +1834,10 @@ while running:
                 _quizzes_resolved_today.clear()
                 _lab_assessments_resolved_today.clear()
                 class_interrupt_box.attend_all = False
-                # Clear exam period so day-detection doesn't re-fire
                 _exam_period_type = ""
                 _exam_idx = 0
                 _exam_schedule.clear()
+                messages = ["Starting post-midterm half manually. Good luck!"]
                 current_screen_state = GAME_SCREEN
 
         # Semester End Screen
@@ -2060,7 +2098,7 @@ while running:
             draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
                        week_count=week_count, day_in_week=day_in_week)
             academic_dashboard.draw(screen, course_manager, week_count)
-            stats_dashboard.draw(screen, student, day_count)
+            stats_dashboard.draw(screen, student, day_count, week_count=week_count)
         elif _last_game_screen == DAY_END_SCREEN:
             avg_k = course_manager.get_average_knowledge()
             day_end_screen(
@@ -2077,7 +2115,7 @@ while running:
                 sick_active=sick_active,
             )
             academic_dashboard.draw(screen, course_manager, week_count)
-            stats_dashboard.draw(screen, student, day_count)
+            stats_dashboard.draw(screen, student, day_count, week_count=week_count)
         save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
 
     elif current_screen_state == MAIN_MENU:
@@ -2223,6 +2261,9 @@ while running:
             from screens import semester_optimal_screen
             _results_content_h = semester_optimal_screen(
                 screen, _optimal_data, sem_prev_btn, sem_quit_btn, scroll_y=_results_scroll_y)
+
+    elif current_screen_state == POST_MID_CHOICE_SCREEN:
+        post_mid_choice_screen(screen, post_mid_repeat_btn, post_mid_manual_btn, message_font)
 
     pygame.display.flip()
 

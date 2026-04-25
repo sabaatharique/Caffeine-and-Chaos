@@ -2531,7 +2531,7 @@ class StatsDashboard:
 
         return False
 
-    def draw(self, screen, student, day_count: int):
+    def draw(self, screen, student, day_count: int, week_count: int = 0):
         self._ensure_fonts()
         t = self._anim_t
 
@@ -2569,6 +2569,9 @@ class StatsDashboard:
         old_clip = screen.get_clip()
         screen.set_clip((0, 0, panel_w, sh))
 
+        y = self._draw_trends_section(screen, student, week_count,
+                                       content_x, content_w, y, content_alpha)
+        y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
         y = self._draw_time_section(screen, student, day_count,
                                     content_x, content_w, y, content_alpha)
         y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
@@ -2608,6 +2611,116 @@ class StatsDashboard:
             self._collapse_arrow_rect = None
 
     # ── Section renderers ────────────────────────────────────────────────
+
+    def _draw_trends_section(self, screen, student, week_count,
+                             x: int, w: int, y: int, alpha: int) -> int:
+        """Draw the TRENDS section: stat arrows, best day, and a mini stacked bar."""
+        y = self._draw_section(screen, "THIS WEEK'S TRENDS", x, w, y, alpha)
+
+        stress_snap = student._week_stress_snapshots
+        health_snap = student._week_health_snapshots
+        motiv_snap  = student._week_motivation_snapshots
+
+        def _trend(snap: list, higher_is_better: bool):
+            """Return (arrow_str, delta_str, color) for a snapshot list."""
+            if len(snap) < 2:
+                return "–", "n/a", self._C_DIM
+            delta = snap[-1] - snap[0]
+            if abs(delta) < 1.0:
+                return "–", f"{delta:+.0f}", self._C_DIM
+            if higher_is_better:
+                arrow = "↑" if delta > 0 else "↓"
+                color = self._C_GOOD if delta > 0 else self._C_BAD
+            else:
+                arrow = "↑" if delta > 0 else "↓"
+                color = self._C_BAD if delta > 0 else self._C_GOOD
+            return arrow, f"{delta:+.0f}", color
+
+        # -- Stress / Health / Motivation trends --
+        for label, snap, higher_good in [
+            ("Stress",     stress_snap, False),
+            ("Health",     health_snap, True),
+            ("Motivation", motiv_snap,  True),
+        ]:
+            arrow, delta_str, color = _trend(snap, higher_good)
+            lbl_surf = self._f_body.render(
+                f"{label}", True, self._alpha_color(self._C_TEXT, alpha))
+            val_surf = self._f_body.render(
+                f"{arrow} {delta_str}", True, self._alpha_color(color, alpha))
+            screen.blit(lbl_surf, (x, y))
+            screen.blit(val_surf, (x + w - val_surf.get_width(), y))
+            y += lbl_surf.get_height() + 5
+
+        # -- Best day this week --
+        y += 4
+        best_day_surf = self._f_body.render(
+            "Best Day", True, self._alpha_color(self._C_LIFESTYLE, alpha))
+        screen.blit(best_day_surf, (x, y))
+
+        study_h = student._week_study_hours
+        best_label = "–"
+        if study_h and stress_snap:
+            from environment import DAYS_OF_WEEK
+            scores = [
+                study_h[i] * 2 - stress_snap[i]
+                for i in range(min(len(study_h), len(stress_snap)))
+            ]
+            best_idx = scores.index(max(scores))
+            best_label = DAYS_OF_WEEK[best_idx % 7][:3]  # e.g. "Mon"
+
+        best_val_surf = self._f_body.render(
+            best_label, True, self._alpha_color(self._C_GOOD, alpha))
+        screen.blit(best_val_surf, (x + w - best_val_surf.get_width(), y))
+        y += best_day_surf.get_height() + 8
+
+        # -- Mini stacked bar chart (Study | Sleep | Relax | Class) --
+        study_total = sum(student._week_study_hours)  if student._week_study_hours  else 0.0
+        sleep_total = sum(student._week_sleep_hours)  if student._week_sleep_hours  else 0.0
+        relax_total = sum(student._week_relax_hours)  if student._week_relax_hours  else 0.0
+        class_total = sum(student._week_class_hours)  if student._week_class_hours  else 0.0
+        grand_total = study_total + sleep_total + relax_total + class_total
+
+        segments = [
+            ("Study", study_total, self._C_TIME),
+            ("Sleep", sleep_total, self._C_GOOD),
+            ("Relax", relax_total, self._C_RECORDS),
+            ("Class", class_total, self._C_WARN),
+        ]
+
+        bar_h = 14
+        if grand_total > 0:
+            bar_surf = pygame.Surface((w, bar_h), pygame.SRCALPHA)
+            bar_surf.fill((*self._C_DIVIDER, alpha))
+            cursor_x = 0
+            for seg_label, seg_h, seg_color in segments:
+                seg_w = int(w * seg_h / grand_total)
+                if seg_w > 0:
+                    pygame.draw.rect(bar_surf, (*seg_color, alpha),
+                                     (cursor_x, 0, seg_w, bar_h))
+                    cursor_x += seg_w
+            screen.blit(bar_surf, (x, y))
+        else:
+            empty_surf = pygame.Surface((w, bar_h), pygame.SRCALPHA)
+            empty_surf.fill((*self._C_DIVIDER, alpha))
+            screen.blit(empty_surf, (x, y))
+        y += bar_h + 3
+
+        # Labels below the bar
+        lbl_x = x
+        lbl_y = y
+        for seg_label, seg_h, seg_color in segments:
+            seg_txt = f"{seg_label} {seg_h:.1f}h"
+            seg_surf = self._f_detail.render(
+                seg_txt, True, self._alpha_color(seg_color, alpha))
+            # Wrap to next line if overflows
+            if lbl_x + seg_surf.get_width() > x + w:
+                lbl_x = x
+                lbl_y += seg_surf.get_height() + 2
+            screen.blit(seg_surf, (lbl_x, lbl_y))
+            lbl_x += seg_surf.get_width() + 8
+        y = lbl_y + self._f_detail.get_height() + 8
+
+        return y
 
     def _draw_time_section(self, screen, student, day_count,
                            x, w, y, alpha) -> int:
