@@ -431,7 +431,7 @@ def exam_screen(screen, exam_type, continue_btn, font, course_manager=None):
 # Semester End Screen
 
 def semester_end_screen(screen, student, avg_knowledge, quit_btn, font,
-                        course_manager, scroll_y=0):
+                        course_manager, scroll_y=0, next_btn=None):
     """
     Comprehensive final-semester results page.
     Shows per-course breakdown of all quizzes, lab evals, mid & final marks,
@@ -487,16 +487,399 @@ def semester_end_screen(screen, student, avg_knowledge, quit_btn, font,
     bye_surf = detail_font.render("Thanks for playing Caffeine & Chaos!", True, (90, 190, 110))
     screen.blit(bye_surf, (WIDTH // 2 - bye_surf.get_width() // 2, strip_y + 70))
 
-    # Bottom fade
-    fade = pygame.Surface((WIDTH, 70), pygame.SRCALPHA)
-    for i in range(70):
-        alpha = int(210 * (i / 70))
-        pygame.draw.line(fade, (8, 22, 12, alpha), (0, 69 - i), (WIDTH, 69 - i))
-    screen.blit(fade, (0, strip_y - 70))
-
-    # Quit button sits in the GPA strip
+    # Quit button (right side of GPA strip) — same position on both pages
     quit_btn.rect.centerx = WIDTH - 80
     quit_btn.rect.y       = strip_y + 30
+    quit_btn.draw(screen)
+
+    # Next-page button (left side of strip)
+    if next_btn is not None:
+        next_btn.rect.centerx = 80
+        next_btn.rect.y = strip_y + 30
+        next_btn.draw(screen)
+
+    return content_height
+
+
+# Semester Stats Screen (Page 2)
+
+def semester_stats_screen(screen, student, course_manager, prev_btn, quit_btn, scroll_y=0, next_btn=None):
+    """
+    Second page of the semester-end screen.
+    Two-column scrollable card grid of lifetime stats.
+    Returns content_height for scroll clamping in the caller.
+    """
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+    _draw_results_bg(screen, (100, 255, 140), (60, 200, 100))
+
+    title_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 42)
+    sub_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    label_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+    value_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    sec_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+    gpa_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 48)
+
+    # Header
+    title_surf = title_font.render("Semester Stats", True, (100, 255, 140))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 10))
+    sub_surf = sub_font.render("A look back at your semester", True, (160, 230, 180))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, 52))
+
+    # Compute assessment counts from course_manager
+    quizzes_taken = sum(1 for c in course_manager.courses if c.course_type == "Theory"
+                         for q in c.scheduled_quizzes if q.get("taken") and not q.get("missed"))
+    quizzes_missed = sum(1 for c in course_manager.courses if c.course_type == "Theory"
+                         for q in c.scheduled_quizzes if q.get("missed"))
+    labs_taken = sum(1 for c in course_manager.courses if c.course_type == "Lab"
+                         for la in getattr(c, "scheduled_lab_assessments", [])
+                         if la.get("taken") and not la.get("missed"))
+    labs_missed = sum(1 for c in course_manager.courses if c.course_type == "Lab"
+                         for la in getattr(c, "scheduled_lab_assessments", [])
+                         if la.get("missed"))
+
+    s = student.stats
+    attended = s["classes_attended"]
+    skipped = s["classes_skipped"]
+    att_rate = (attended / max(1, attended + skipped)) * 100
+
+    # Card data 
+    sections = [
+        ("Time Spent", [
+            ("Hours Studied", f"{s['hours_studied']:.1f} h"),
+            ("Hours in Class", f"{s['hours_in_class']:.1f} h"),
+            ("Hours Slept", f"{s['hours_slept']:.1f} h"),
+            ("Hours Relaxed", f"{s['hours_relaxed']:.1f} h"),
+            ("Hours Without WiFi", f"{s['hours_wifi_outage']:.1f} h"),
+        ]),
+        ("Health Events", [
+            ("Times Fallen Sick", str(s["times_sick"])),
+            ("Total Sick Days", str(s["total_sick_days"])),
+            ("Longest Sick Streak", f"{s['longest_sick_streak']} day(s)"),
+            ("Burnout Episodes", str(s["burnout_occurrences"])),
+            ("Days Burnt Out", str(s["days_burnt_out"])),
+        ]),
+        ("Daily Life", [
+            ("Coffees Drunk", str(s["coffees_drunk"])),
+            ("Meals Eaten", str(s["meals_eaten"])),
+            ("Classes Attended", str(attended)),
+            ("Classes Skipped", str(skipped)),
+            ("Attendance Rate", f"{att_rate:.0f}%"),
+        ]),
+        ("Assessments", [
+            ("Quizzes Taken", str(quizzes_taken)),
+            ("Quizzes Missed", str(quizzes_missed)),
+            ("Lab Assessments Taken", str(labs_taken)),
+            ("Lab Assessments Missed", str(labs_missed)),
+        ]),
+        ("Peak Stats", [
+            ("Peak Stress", f"{s['peak_stress']:.0f} / 100"),
+            ("Lowest Health", f"{s['lowest_health']:.0f} / 100"),
+            ("Peak Motivation", f"{s['peak_motivation']:.0f} / 100"),
+        ]),
+    ]
+
+    # Layout
+    content_top = 84
+    strip_h = 100
+    clip_h = HEIGHT - content_top - strip_h
+
+    COL_GAP = 20
+    COL_W = (WIDTH - 60 - COL_GAP) // 2
+    left_x = 30
+    right_x = left_x + COL_W + COL_GAP
+
+    CARD_PAD = 10
+    CARD_GAP = 8
+    SEC_H = sec_font.get_height() + 6
+    ROW_H = max(label_font.get_height(), value_font.get_height()) + 6
+
+    def _card_height(rows):
+        return CARD_PAD + SEC_H + len(rows) * ROW_H + CARD_PAD
+
+    def _draw_card(cx, cy, cw, sec_title, rows):
+        """Draw one stat card; cy is the already-scrolled canvas y."""
+        card_h = _card_height(rows)
+        card_surf = pygame.Surface((cw, card_h), pygame.SRCALPHA)
+        card_surf.fill((18, 30, 22, 215))
+        screen.blit(card_surf, (cx, cy))
+        pygame.draw.rect(screen, (60, 200, 100), (cx, cy, cw, card_h), 2, border_radius=8)
+
+        sec_surf = sec_font.render(sec_title, True, (100, 230, 140))
+        screen.blit(sec_surf, (cx + CARD_PAD, cy + CARD_PAD))
+        ry = cy + CARD_PAD + SEC_H
+
+        for lbl, val in rows:
+            lbl_surf = label_font.render(lbl + ":", True, (140, 190, 155))
+            val_surf = value_font.render(val, True, (220, 245, 225))
+            screen.blit(lbl_surf, (cx + CARD_PAD,
+                                   ry + (ROW_H - lbl_surf.get_height()) // 2))
+            screen.blit(val_surf, (cx + cw - CARD_PAD - val_surf.get_width(),
+                                   ry + (ROW_H - val_surf.get_height()) // 2))
+            ry += ROW_H
+
+        return cy + card_h + CARD_GAP
+
+    # Distribute: left col = sections 0,1,2 ; right col = sections 3,4
+    left_secs = sections[:3]
+    right_secs = sections[3:]
+
+    # Measure the taller column to derive total content height
+    left_h = sum(_card_height(s[1]) + CARD_GAP for s in left_secs)
+    right_h = sum(_card_height(s[1]) + CARD_GAP for s in right_secs)
+    content_height = max(left_h, right_h) + 120   
+    # Scrollable clip region
+    screen.set_clip((0, content_top, WIDTH, clip_h))
+
+    start_y = content_top + 8 - int(scroll_y)
+
+    ly = start_y
+    for sec in left_secs:
+        ly = _draw_card(left_x, ly, COL_W, sec[0], sec[1])
+
+    ry_pos = start_y
+    for sec in right_secs:
+        ry_pos = _draw_card(right_x, ry_pos, COL_W, sec[0], sec[1])
+
+    # Footer fade (matches results page)
+    fade_h = 90
+    fade = pygame.Surface((WIDTH, fade_h), pygame.SRCALPHA)
+    for i in range(fade_h):
+        alpha = int(200 * (i / fade_h))
+        pygame.draw.line(fade, (8, 8, 35, alpha), (0, fade_h - 1 - i), (WIDTH, fade_h - 1 - i))
+    screen.blit(fade, (0, HEIGHT - fade_h))
+
+    screen.set_clip(None)
+
+    # Bottom strip — same dimensions as semester_end_screen 
+    strip_y = HEIGHT - strip_h
+    strip_surf = pygame.Surface((WIDTH, strip_h), pygame.SRCALPHA)
+    strip_surf.fill((10, 30, 20, 245))
+    screen.blit(strip_surf, (0, strip_y))
+    pygame.draw.line(screen, (60, 200, 100), (0, strip_y), (WIDTH, strip_y), 2)
+
+    hint_surf = detail_font.render("How did your semester treat you?", True, (90, 190, 110))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, strip_y + 16))
+
+    # "Results" on the left
+    prev_btn.rect.centerx = 80
+    prev_btn.rect.y = strip_y + 30
+    prev_btn.draw(screen)
+    
+    if next_btn is not None:
+        next_btn.rect.centerx = 80 + 120
+        next_btn.rect.y = strip_y + 30
+        next_btn.draw(screen)
+
+    # Quit on the right — identical to page 0
+    quit_btn.rect.centerx = WIDTH - 80
+    quit_btn.rect.y = strip_y + 30
+    quit_btn.draw(screen)
+
+    return content_height
+
+
+def compute_optimal_path(student, course_manager) -> dict:
+    """ Computes the retrospective optimal study path based on actual semester execution. """
+    from courses import Course
+
+    target_cgpa = student.target_cgpa
+    if target_cgpa <= 0:
+        return {} # No target set
+
+    # Find uniform required percentage across courses to hit target CGPA
+    # Grade jumps at 40, 45, 50, 55, 60, 65, 70, 75, 80
+    test_pcts = [40, 45, 50, 55, 60, 65, 70, 75, 80]
+    target_pct = 80.0
+    for p in test_pcts:
+        if Course._percentage_to_grade_point(p) >= target_cgpa:
+            target_pct = float(p)
+            break
+
+    # Use end-of-semester stats
+    s = student.stats
+    sleep = student.sleep
+    health = student.health
+    stress = student.stress
+    motivation = student.motivation
+
+    # Compute global efficiency
+    avg_knowledge = course_manager.get_average_knowledge()
+    efficiency = (sleep + health + (100 - stress) + (100 - motivation) + avg_knowledge) / 500.0
+
+    optimal_data = {
+        "target_cgpa": target_cgpa,
+        "achieved_cgpa": course_manager.calculate_cgpa(),
+        "courses": [],
+        "actual_study": s.get("hours_studied", 0.0)
+    }
+
+    total_optimal_study = 0.0
+    
+    for c in course_manager.courses:
+        # Expected knowledge
+        expected_knowledge = 10.0 + (c.occurred_classes / max(1, c.total_classes)) * 90.0 if c.total_classes > 0 else 100.0
+        req_k = Course.required_knowledge_for_pct(target_pct, sleep, health, stress, expected_knowledge, course_type=c.course_type)
+        
+        actual_k = c.knowledge
+        gap_k = req_k - actual_k
+        
+        # Invert learning: gain = hours * study_knowledge_rate * efficiency * knowledge_mult
+        study_knowledge_rate = 0.8 * student.type_mult
+        if gap_k > 0:
+            optimal_hours = gap_k / max(0.001, (study_knowledge_rate * efficiency))
+        else:
+            optimal_hours = 0.0
+            
+        optimal_data["courses"].append({
+            "name": c.name,
+            "required_knowledge": req_k,
+            "actual_knowledge": actual_k,
+            "gap_knowledge": gap_k,
+            "optimal_hours": optimal_hours,
+            "attendance_blocked": not c.is_attendance_eligible()
+        })
+        
+        total_optimal_study += optimal_hours
+
+    optimal_data["total_optimal_study"] = total_optimal_study
+    semester_study_days = 105 - s.get("total_sick_days", 0) - s.get("days_burnt_out", 0)
+    if semester_study_days > 0:
+        optimal_data["optimal_study_per_day"] = total_optimal_study / semester_study_days
+        actual_study_hours = s.get("hours_studied", 0.0)
+        optimal_data["actual_study_per_day"] = actual_study_hours / semester_study_days
+        optimal_data["gap_per_day"] = optimal_data["optimal_study_per_day"] - optimal_data["actual_study_per_day"]
+        optimal_data["lost_days"] = s.get("total_sick_days", 0) + s.get("days_burnt_out", 0)
+        optimal_data["total_days"] = semester_study_days
+        
+        theoretical_daily_max = 24.0
+        optimal_data["theoretical_daily_max"] = 12 # heuristics
+    else:
+        optimal_data["optimal_study_per_day"] = 0
+        optimal_data["actual_study_per_day"] = 0
+        optimal_data["gap_per_day"] = 0
+        optimal_data["lost_days"] = 0
+        optimal_data["theoretical_daily_max"] = 24
+
+    return optimal_data
+
+
+def semester_optimal_screen(screen, optimal_data, prev_btn, quit_btn, scroll_y=0):
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+    _draw_results_bg(screen, (10, 20, 30), (30, 50, 70))
+
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 42)
+    sub_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    label_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+    value_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+
+    # Header
+    title_surf = title_font.render("Your Optimal Path", True, (100, 200, 255))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 10))
+    sub_surf = sub_font.render("Based on your student profile and actual semester", True, (160, 200, 230))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, 52))
+    
+    if not optimal_data:
+        err_surf = title_font.render("No Target CGPA Set.", True, (255, 100, 100))
+        screen.blit(err_surf, (WIDTH // 2 - err_surf.get_width() // 2, HEIGHT // 2))
+        return HEIGHT
+
+    # Top summary
+    tgt_cgpa = optimal_data["target_cgpa"]
+    ach_cgpa = optimal_data["achieved_cgpa"]
+    gap_cgpa = ach_cgpa - tgt_cgpa
+    
+    sum_str = f"Target CGPA: {tgt_cgpa:.2f}    Achieved: {ach_cgpa:.2f}    Gap: {gap_cgpa:+.2f}"
+    sum_surf = value_font.render(sum_str, True, (255,255,255))
+    screen.blit(sum_surf, (WIDTH // 2 - sum_surf.get_width() // 2, 85))
+
+    # Single most actionable number
+    opt_pd = optimal_data["optimal_study_per_day"]
+    act_pd = optimal_data["actual_study_per_day"]
+    tot_opt = optimal_data["total_optimal_study"]
+    act_tot = optimal_data.get("actual_study", 0.0)
+    gap_tot = tot_opt - act_tot
+    
+    col = (255,255,100) if gap_tot > 0 else (100,255,100)
+    act_text1 = f"You needed ~{opt_pd:.1f} hrs of focused study per day."
+    act_text2 = f"You averaged {act_pd:.1f} hrs. Gap: {gap_tot:+.1f} hours over the semester."
+    
+    at_surf1 = value_font.render(act_text1, True, col)
+    screen.blit(at_surf1, (WIDTH // 2 - at_surf1.get_width() // 2, 120))
+    at_surf2 = detail_font.render(act_text2, True, (220,220,240))
+    screen.blit(at_surf2, (WIDTH // 2 - at_surf2.get_width() // 2, 150))
+    
+    content_top = 180
+    strip_h = 100
+    clip_h = HEIGHT - content_top - strip_h
+    
+    screen.set_clip((0, content_top, WIDTH, clip_h))
+    
+    cw = WIDTH - 60
+    cx = 30
+    cy = content_top + 10 - int(scroll_y)
+    
+    CARD_PAD = 12
+    for c in optimal_data["courses"]:
+        card_h = 105
+        card_surf = pygame.Surface((cw, card_h), pygame.SRCALPHA)
+        card_surf.fill((20, 20, 40, 215))
+        screen.blit(card_surf, (cx, cy))
+        
+        bcol = (255,100,100) if c["attendance_blocked"] else (100, 160, 255)
+        pygame.draw.rect(screen, bcol, (cx, cy, cw, card_h), 2, border_radius=8)
+        
+        name_surf = value_font.render(c["name"], True, (200, 230, 255))
+        screen.blit(name_surf, (cx + CARD_PAD, cy + CARD_PAD))
+        
+        if c["attendance_blocked"]:
+            bsurf = detail_font.render("LIMITING FACTOR: ATTENDANCE BLOCKED", True, (255, 100, 100))
+            screen.blit(bsurf, (cx + cw - CARD_PAD - bsurf.get_width(), cy + CARD_PAD))
+            
+        rk = c["required_knowledge"]
+        ak = c["actual_knowledge"]
+        gk = c["gap_knowledge"]
+        oh = c["optimal_hours"]
+        
+        str1 = f"Knowledge to hit target: {rk:.1f}%    Actual: {ak:.1f}%    Gap: {gk:+.1f}%"
+        s1 = label_font.render(str1, True, (200, 200, 200))
+        screen.blit(s1, (cx + CARD_PAD, cy + 45))
+        
+        str2 = f"Optimal Study Time Required: {oh:.1f} hrs (Total this Semester)"
+        scol = (150, 255, 150) if oh <= act_pd else (255, 200, 150)
+        s2 = label_font.render(str2, True, scol)
+        screen.blit(s2, (cx + CARD_PAD, cy + 70))
+        
+        cy += card_h + 10
+        
+    if optimal_data.get("lost_days", 0) > 0:
+        ls_surf = detail_font.render(f"Note: You lost {optimal_data['lost_days']} study days to illness/burnout.", True, (255, 150, 150))
+        screen.blit(ls_surf, (cx + CARD_PAD, cy))
+        cy += 30
+
+    if optimal_data["optimal_study_per_day"] > optimal_data["theoretical_daily_max"]:
+        fw_surf = detail_font.render("Warning: Target may have been out of reach for your stats. (Required > Max Daily)", True, (255, 100, 100))
+        screen.blit(fw_surf, (cx + CARD_PAD, cy))
+        cy += 30
+        
+    content_height = cy + int(scroll_y) - content_top + 160
+    screen.set_clip(None)
+
+    # Bottom strip — same dimensions as semester_end_screen 
+    strip_y = HEIGHT - strip_h
+    strip_surf = pygame.Surface((WIDTH, strip_h), pygame.SRCALPHA)
+    strip_surf.fill((10, 30, 40, 245))
+    screen.blit(strip_surf, (0, strip_y))
+    pygame.draw.line(screen, (100, 200, 255), (0, strip_y), (WIDTH, strip_y), 2)
+
+    prev_btn.rect.centerx = 80
+    prev_btn.rect.y = strip_y + 30
+    prev_btn.draw(screen)
+
+    # Quit on the right — identical to other pages
+    quit_btn.rect.centerx = WIDTH - 80
+    quit_btn.rect.y = strip_y + 30
     quit_btn.draw(screen)
 
     return content_height

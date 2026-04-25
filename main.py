@@ -10,7 +10,8 @@ from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
                 QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
-                     exam_screen, midterm_results_screen, semester_end_screen)
+                     exam_screen, midterm_results_screen, semester_end_screen,
+                     semester_stats_screen)
 from savegame import save_game, load_game, delete_save, save_exists
 
 # Window & clock
@@ -177,6 +178,8 @@ class ReplayRunner:
         _week = ((self.current_day - 1) // 7) + 1
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
+        if overlap > 0:
+            self.student.stats["hours_wifi_outage"] += overlap
 
         _actual = None  # course found by attend_class lookup (used by silent resolution)
         if action == 'study' and self.student.action_status['study']:
@@ -484,6 +487,8 @@ class WeekReplayRunner:
         _week = ((self.current_day - 1) // 7) + 1
         overlap  = outage_overlap(self._day_outages, action_start, action_end)
         wifi_on  = (overlap > 0 and action == 'study')
+        if overlap > 0:
+            self.student.stats["hours_wifi_outage"] += overlap
 
         _actual = None  # course found by attend_class lookup (used by silent resolution)
         if action == 'study' and self.student.action_status['study']:
@@ -607,6 +612,7 @@ current_screen_state = MAIN_MENU
 # Scroll state for results pages
 _results_scroll_y = 0.0
 _results_content_h = 0
+_sem_end_page = 0   # 0 = results page, 1 = stats page
 
 # Semester tracking
 exam_type = "mid"   # "mid" or "final"
@@ -717,8 +723,10 @@ repeat_week_btn = Button(_gap * 3 + _btn_w * 2, _btn_y, _btn_w, 40, "Repeat Week
 quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font)
 
 # Exam screen / semester end continue button (centred)
-exam_continue_btn   = Button(WIDTH // 2 - 60, HEIGHT // 2 + 110, 120, 40, "Continue", button_font)
-sem_quit_btn        = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
+exam_continue_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 110, 120, 40, "Continue", button_font)
+sem_quit_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
+sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats >",   button_font)
+sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "< Results", button_font)
 
 # Save-prompt buttons (shown in the SAVE_PROMPT overlay)
 _sp_y = HEIGHT // 2 + 20
@@ -734,6 +742,7 @@ replay_runner: ReplayRunner | None = None
 
 # Track the last non-prompt screen state so SAVE_PROMPT can render a backdrop
 _last_game_screen: str = MAIN_MENU
+_optimal_data = None
 
 
 def sweep_missed_assessments(c_manager, d_count, out_list):
@@ -844,7 +853,7 @@ while running:
 
         # Mouse-wheel scrolling for results screens
         if event.type == pygame.MOUSEWHEEL:
-            if current_screen_state in (MIDTERM_RESULTS_SCREEN, SEMESTER_END_SCREEN):
+            if current_screen_state == MIDTERM_RESULTS_SCREEN or current_screen_state == SEMESTER_END_SCREEN:
                 _results_scroll_y -= event.y * 28
                 _results_scroll_y = max(0.0, min(_results_scroll_y,
                                                   max(0.0, _results_content_h - HEIGHT + 120)))
@@ -917,7 +926,24 @@ while running:
                             course_manager.schedule_all_lab_assessments()
 
                     # Route to the correct screen based on saved state
-                    if day_over:
+                    if week_count > 15:
+                        # Semester is over — generate finals if not already done and go to results
+                        for c in course_manager.courses:
+                            if c.course_type == "Theory" and c.final_mark is None:
+                                if not c.is_attendance_eligible():
+                                    c.final_mark = 0
+                                else:
+                                    c.generate_final_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
+                            elif c.course_type == "Lab" and c.lab_final is None:
+                                if not c.is_attendance_eligible():
+                                    c.lab_final = 0
+                                else:
+                                    c.generate_lab_final(week_count, student.stress, student.health, student.is_sick)
+                        _results_scroll_y = 0.0
+                        _sem_end_page = 0
+                        _last_game_screen = SEMESTER_END_SCREEN
+                        current_screen_state = SEMESTER_END_SCREEN
+                    elif day_over:
                         _last_game_screen = DAY_END_SCREEN
                         current_screen_state = DAY_END_SCREEN
                     else:
@@ -936,6 +962,8 @@ while running:
             wizard.handle_event(event)
 
             if wizard.done:
+                # Apply target cgpa
+                student.target_cgpa = wizard.result.get("target_cgpa", 0.0)
                 # Apply the schedule grid to each Course object
                 course_manager.apply_schedule(wizard.result.get("schedule", {}))
                 course_manager.schedule_all_quizzes()
@@ -967,6 +995,7 @@ while running:
                         # Small motivation penalty for skipping
                         p_course.occurred_classes += 1   # class happened; player chose not to go
                         student.motivation -= 2
+                        student.stats["classes_skipped"] += 1
                         student.clamp()
                         messages.append(f"Skipped {p_course.name}.")
                         messages = messages[-5:]
@@ -995,6 +1024,8 @@ while running:
                     t_after  = time_of_day + hours
                     overlap  = outage_overlap(daily_outages, t_before, t_after)
                     wifi_affected = (overlap > 0 and pending_action == 'study')
+                    if overlap > 0:
+                        student.stats["hours_wifi_outage"] += overlap
 
                     new_messages.extend(student.apply_hunger_decay(hours))
                     if pending_action == 'study':
@@ -1429,6 +1460,7 @@ while running:
                             else:
                                 c.generate_lab_final(week_count, student.stress, student.health, student.is_sick)
                     _results_scroll_y = 0.0
+                    _sem_end_page = 0
                     current_screen_state = SEMESTER_END_SCREEN
                 else:
                     # Mid exam done → generate mid marks then show midterm results
@@ -1456,6 +1488,32 @@ while running:
 
         # Semester End Screen
         elif current_screen_state == SEMESTER_END_SCREEN:
+            if _sem_end_page == 0:
+                if sem_next_btn.clicked(event):
+                    _sem_end_page = 1
+                    _results_scroll_y = 0.0
+                    sem_next_btn.text = "Optimal >"
+                    sem_prev_btn.text = "< Results"
+            elif _sem_end_page == 1:
+                if sem_next_btn.clicked(event):
+                    _sem_end_page = 2
+                    _results_scroll_y = 0.0
+                    sem_prev_btn.text = "< Stats"
+                    # Calculate optimal data once when navigating to the screen
+                    if _optimal_data is None:
+                        from screens import compute_optimal_path
+                        _optimal_data = compute_optimal_path(student, course_manager)
+                if sem_prev_btn.clicked(event):
+                    _sem_end_page = 0
+                    _results_scroll_y = 0.0
+                    sem_next_btn.text = "Stats >"
+            elif _sem_end_page == 2:
+                if sem_prev_btn.clicked(event):
+                    _sem_end_page = 1
+                    _results_scroll_y = 0.0
+                    sem_next_btn.text = "Optimal >"
+                    sem_prev_btn.text = "< Results"
+                    
             if sem_quit_btn.clicked(event):
                 running = False
 
@@ -1709,9 +1767,21 @@ while running:
 
     elif current_screen_state == SEMESTER_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
-        _results_content_h = semester_end_screen(
-            screen, student, avg_k, sem_quit_btn, message_font,
-            course_manager, scroll_y=_results_scroll_y)
+        if _sem_end_page == 0:
+            _results_content_h = semester_end_screen(
+                screen, student, avg_k, sem_quit_btn, message_font,
+                course_manager, scroll_y=_results_scroll_y,
+                next_btn=sem_next_btn)
+        elif _sem_end_page == 1:
+            _results_content_h = semester_stats_screen(
+                screen, student, course_manager,
+                sem_prev_btn, sem_quit_btn,
+                scroll_y=_results_scroll_y,
+                next_btn=sem_next_btn)
+        elif _sem_end_page == 2:
+            from screens import semester_optimal_screen
+            _results_content_h = semester_optimal_screen(
+                screen, _optimal_data, sem_prev_btn, sem_quit_btn, scroll_y=_results_scroll_y)
 
     pygame.display.flip()
 

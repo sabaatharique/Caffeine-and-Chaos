@@ -4,9 +4,24 @@ import os
 SAVE_FILE = "save_data.json"
 
 
+def _default_stats() -> dict:
+    """Return a zeroed lifetime-stats dict (used when loading old saves)."""
+    return {
+        "hours_studied": 0.0, "hours_slept": 0.0, "hours_relaxed": 0.0,
+        "hours_in_class": 0.0, "hours_wifi_outage": 0.0,
+        "coffees_drunk": 0, "meals_eaten": 0,
+        "classes_attended": 0, "classes_skipped": 0,
+        "burnout_occurrences": 0, "days_burnt_out": 0,
+        "times_sick": 0, "total_sick_days": 0,
+        "longest_sick_streak": 0, "_current_sick_streak": 0,
+        "peak_stress": 0, "lowest_health": 100, "peak_motivation": 0,
+    }
+
+
 def _student_to_dict(student) -> dict:
     return {
         "type_mult": student.type_mult,
+        "target_cgpa": student.target_cgpa,
         "sleep": student.sleep,
         "health": student.health,
         "stress": student.stress,
@@ -20,12 +35,14 @@ def _student_to_dict(student) -> dict:
         "sick_days_remaining": student.sick_days_remaining,
         "stress_history": student._stress_history,
         "health_history": student._health_history,
+        "stats": student.stats,
     }
 
 
 def _student_from_dict(data: dict, student):
     """Restore student attributes from a dict (in-place)."""
     student.type_mult = data.get("type_mult", 1.0)
+    student.target_cgpa = data.get("target_cgpa", 0.0)
     student.sleep = data.get("sleep", 90)
     student.health = data.get("health", 80)
     student.stress = data.get("stress", 30)
@@ -35,10 +52,13 @@ def _student_from_dict(data: dict, student):
     student.attendance = data.get("attendance", 0)
     student.consecutive_stress_days = data.get("consecutive_stress_days", 0)
     student.burnout_days_remaining = data.get("burnout_days_remaining", 5)
-    student.is_sick             = data.get("is_sick", False)
+    student.is_sick = data.get("is_sick", False)
     student.sick_days_remaining = data.get("sick_days_remaining", 0)
     student._stress_history     = data.get("stress_history", [])
     student._health_history     = data.get("health_history", [])
+    # Merge saved stats with defaults so old saves load without KeyError
+    saved_stats = data.get("stats", {})
+    student.stats = {**_default_stats(), **saved_stats}
     student.update_action_status()
 
 

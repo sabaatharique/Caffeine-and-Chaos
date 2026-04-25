@@ -1384,14 +1384,19 @@ class SetupWizard:
         self.btn_font = btn_font
         self.active = False
         self.done = False
-        self.step = 0 # 0: Student Type, 1: num_theory, 2: theory_form, 3: num_labs, 4: lab_form
+        self.step = 0 # 0: Student Type, 1: num_theory, 2: theory_form, 3: num_labs, 4: lab_form, 5: schedule, 6: cgpa
         
-        self.result = {"type_mult": 1.0, "courses": [], "labs": [], "schedule": {}}
+        self.result = {"type_mult": 1.0, "target_cgpa": 0.0, "courses": [], "labs": [], "schedule": {}}
 
         # Step 0 Slider
         labels = [(0.6, "Bad"), (1.0, "Average"), (1.4, "Good")]
         self.type_slider = Slider(300, 300, 400, 15, font, min_val=0.6, max_val=1.4, labels=labels)
         self.type_confirm_btn = Button(425, 420, 150, 45, "Confirm", btn_font)
+
+        # Step 6 Slider
+        cgpa_labels = [(2.0, "2.0 (D)"), (3.0, "3.0 (B)"), (4.0, "4.0 (A+)")]
+        self.cgpa_slider = Slider(300, 300, 400, 15, font, min_val=2.0, max_val=4.0, default=3.5, labels=cgpa_labels)
+        self.cgpa_confirm_btn = Button(425, 420, 150, 45, "Confirm Target", btn_font)
 
         # Quantity screens
         self.qty_input = NumberBox(font, smallfont)
@@ -1410,7 +1415,7 @@ class SetupWizard:
         self.active = True
         self.done = False
         self.step = 0
-        self.result = {"type_mult": 1.0, "courses": [], "labs": [], "schedule": {}}
+        self.result = {"type_mult": 1.0, "target_cgpa": 0.0, "courses": [], "labs": [], "schedule": {}}
         self._error = ""
 
     def _build_form(self, count, type="Theory"):
@@ -1520,6 +1525,14 @@ class SetupWizard:
             self.schedule_builder.handle_event(event)
             if self.schedule_builder.confirmed:
                 self.result["schedule"] = self.schedule_builder.get_schedule()
+                self.step = 6
+
+        elif self.step == 6:  # Target CGPA
+            self.cgpa_slider.handle_event(event)
+            if self.cgpa_confirm_btn.clicked(event):
+                # Round to nearest 0.25
+                val = round(self.cgpa_slider.value * 4) / 4
+                self.result["target_cgpa"] = val
                 self.active = False
                 self.done = True
 
@@ -1629,6 +1642,22 @@ class SetupWizard:
 
         elif self.step == 5:  # Schedule Builder
             self.schedule_builder.draw(screen)
+
+        elif self.step == 6:
+            draw_centered("What is your Target CGPA?", 120, title_font)
+            sw = screen.get_width()
+            self.cgpa_slider.track_rect.x = sw // 2 - self.cgpa_slider.track_rect.w // 2
+            self.cgpa_slider.track_rect.y = 320
+            self.cgpa_slider._update_knob()
+            self.cgpa_slider.draw(screen)
+
+            # Draw current value above the slider
+            val = round(self.cgpa_slider.value * 4) / 4
+            draw_centered(f"Target: {val:.2f}", 260, self.font, (255, 230, 150))
+
+            self.cgpa_confirm_btn.rect.x = sw // 2 - self.cgpa_confirm_btn.rect.w // 2
+            self.cgpa_confirm_btn.rect.y = 450
+            self.cgpa_confirm_btn.draw(screen)
 
 class QuizResultBox:
     """
