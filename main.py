@@ -333,6 +333,7 @@ class WeekReplayRunner:
 
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
+        self.last_completed_week = start_week  # updated whenever a week finishes
 
         # Rewind quiz taken/missed flags for every week we're about to fast-forward
         for w in range(start_week + 1, start_week + n_weeks + 1):
@@ -407,6 +408,7 @@ class WeekReplayRunner:
         # All days in this week done?
         if self.day_in_week >= len(self.week_actions):
             completed_week = self.current_week
+            self.last_completed_week = completed_week
             self._start_new_week()   # bumps weeks_done, current_week; does NOT touch current_day
             if self.weeks_done >= self.total_weeks:
                 self.done = True
@@ -459,16 +461,16 @@ class WeekReplayRunner:
 
             self.day_in_week += 1
 
-            # Stop after Friday of the last class week before each exam period
-            # (week 7 = Friday before midterm; week 15 = Friday before finals)
-            _completed_diw  = self.day_in_week   # now 1-based after increment … hmm
+            # Stop after completing the 7th day (Sunday) of the last pre-exam week
+            # (week 7 = last week before midterm; week 15 = last week before finals)
             _completed_week = self.current_week
             _is_last_pre_exam = (_completed_week in (7, 15))
-            _finished_friday  = (self.day_in_week == 5)  # 5th day of week = Friday
-            if _is_last_pre_exam and _finished_friday:
+            _finished_all_days = (self.day_in_week >= len(self.week_actions))  # done with this week
+            if _is_last_pre_exam and _finished_all_days:
                 # Stop cleanly — main loop will trigger exam schedule flow
+                self.last_completed_week = _completed_week
                 self.done = True
-                stop_msg = (f"Week {_completed_week} Friday done — stopping replay before exam period.")
+                stop_msg = (f"Week {_completed_week} done — stopping replay before exam period.")
                 self.msgs.append(stop_msg)
                 return day_msgs + [stop_msg], alert_info
 
@@ -1062,7 +1064,7 @@ while running:
                     exam_idx=_exam_idx,
                     exam_copy_to_all=_exam_copy_to_all,
                     exam_prep_actions=_exam_prep_actions,
-                    pre_mid_template=_pre_mid_week_template
+                    pre_mid_week_template=_pre_mid_week_template
                 )
                 running = False
             if save_no_btn.clicked(event):
@@ -1106,7 +1108,7 @@ while running:
                     _exam_idx = loaded.get("exam_idx", 0)
                     _exam_copy_to_all = loaded.get("exam_copy_to_all", False)
                     _exam_prep_actions[:] = loaded.get("exam_prep_actions", [])
-                    _pre_mid_week_template[:] = loaded.get("pre_mid_template", [])
+                    _pre_mid_week_template[:] = loaded.get("pre_mid_week_template", [])
                     copy_all_checkbox.checked = _exam_copy_to_all
                     # Reconstruct _exam_schedule from course_manager
                     if _exam_period_type == "mid":
@@ -1587,10 +1589,14 @@ while running:
                         _exam_prep_actions[:] = list(day_actions)
                     # Save or reset week_actions based on current day
                     if day_in_week == 7:      # completed last day of the week
-                        # Feature 1: Keep a copy of weeks 1-7 for the "Post-Mid Repeat" template
+                        # Feature 1: Overwrite template with this week's full pattern.
+                        # We only need the last pre-mid week (week 7) as a flat list of
+                        # day-action-lists — exactly what WeekReplayRunner expects.
                         if week_count <= 7:
                             _full_week = list(week_actions) + [list(day_actions)]
-                            _pre_mid_week_template.append(_full_week)
+                            while len(_full_week) < 7:
+                                _full_week.append([])
+                            _pre_mid_week_template[:] = [list(d) for d in _full_week]
 
                         student.reset_week_snapshots()  # Reset trends for the new week
                         week_actions.clear()  # fresh start for next week
@@ -1623,6 +1629,14 @@ while running:
                         _exam_copy_to_all = False
                         _exam_prep_actions.clear()
                         copy_all_checkbox.checked = False
+                        # Save week-7 pattern as template for post-mid lifestyle repeat
+                        # week_actions was cleared above (day_in_week==7 path), so we use the
+                        # snapshot we took just before: week_actions + day_actions from this day.
+                        # At this point day_actions was already cleared too, so we need the
+                        # snapshot we saved before clearing. Re-capture from what we know:
+                        # The template was appended above in the day_in_week==7 block,
+                        # so _pre_mid_week_template[-1] holds the full week-7 snapshot.
+                        # Nothing more to do — it was captured in the block above.
                         current_screen_state = EXAM_SCREEN
                     elif week_count < 16 and new_wk >= 16 and _exam_period_type == "":  # crossed into final-exam period (first time only)
                         course_manager.generate_final_schedule()
@@ -1799,34 +1813,10 @@ while running:
         # Midterm Results Screen
         elif current_screen_state == MIDTERM_RESULTS_SCREEN:
             if exam_continue_btn.clicked(event):
-                current_screen_state = POST_MID_CHOICE_SCREEN
-
-        # Post-Mid Choice Screen (Feature 1)
-        elif current_screen_state == POST_MID_CHOICE_SCREEN:
-            if post_mid_repeat_btn.clicked(event):
-                # Use the most recent week (Week 7) as the template.
-                _style = _pre_mid_week_template[-1] if _pre_mid_week_template else []
-                
-                week_replay_runner = WeekReplayRunner(
-                    student, course_manager, _style, 15 - 8 + 1,
-                    49, 7 # Starts at end of Day 49 (Week 7 Sunday), week 7
-                )
-                week_replay_runner._start_new_day()
-                
-                day_count = week_replay_runner.current_day
-                week_count = week_replay_runner.current_week
-                time_of_day = week_replay_runner.time_cursor
-                
-                _exam_period_type = ""
-                _exam_idx = 0
-                _exam_schedule.clear()
-                messages = ["Post-midterm lifestyle repeat initiated!"]
-                current_screen_state = DAY_END_SCREEN
-
-            if post_mid_manual_btn.clicked(event):
-                day_count = 50       # Day 50 = Week 8 Monday
-                time_of_day = 8.0    # 8:00 AM
-                day_over = False
+                # Clear exam period state so day-detection and exam-label logic don't re-fire
+                day_count   = 64       # Day 64 = Week 10 Monday (after weeks 8-9 exams)
+                time_of_day = 8.0
+                day_over    = False
                 current_game_bg = bg_map['default']
                 daily_outages = wifi_failure_event()
                 todays_classes.clear()
@@ -1837,6 +1827,50 @@ while running:
                 _exam_period_type = ""
                 _exam_idx = 0
                 _exam_schedule.clear()
+                student.reset_week_snapshots()
+                if _pre_mid_week_template:
+                    current_screen_state = POST_MID_CHOICE_SCREEN
+                else:
+                    current_screen_state = GAME_SCREEN
+
+        # Post-Mid Choice Screen (Feature 1)
+        elif current_screen_state == POST_MID_CHOICE_SCREEN:
+            if post_mid_repeat_btn.clicked(event):
+                # _pre_mid_week_template is a flat 2D list of day-action-lists (week 7 pattern).
+                # Post-mid class weeks are 10-15 = 6 weeks.
+                # Midterm exam weeks (8-9) are already done; day 64 = Week 10 Monday.
+                # start_day=63 (end of week 9 Sunday) so runner's first day becomes 64.
+                # start_week=9 so runner's first current_week is 10.
+                _style = list(_pre_mid_week_template) if _pre_mid_week_template else []
+
+                week_replay_runner = WeekReplayRunner(
+                    student, course_manager,
+                    _style,
+                    n_weeks=6,        # weeks 10, 11, 12, 13, 14, 15
+                    start_day=63,
+                    start_week=9
+                )
+                week_actions.clear()
+                week_actions.extend([list(d) for d in _style])
+
+                # Check if week 10 has assessments before starting
+                assessments = week_replay_runner.get_next_week_assessments()
+                if assessments:
+                    week_replay_runner.quiz_week_pending = True
+                    week_replay_runner.msgs.append(
+                        f"Week {week_replay_runner.current_week} begins but has assessments scheduled."
+                    )
+                    quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
+                else:
+                    week_replay_runner._start_new_day()
+                    week_replay_runner.msgs.append(
+                        f"Week {week_replay_runner.current_week} begins (pre-mid style replay)."
+                    )
+                messages = ["Replaying pre-mid lifestyle for weeks 10–15..."]
+                current_screen_state = DAY_END_SCREEN
+
+            if post_mid_manual_btn.clicked(event):
+                # day_count/time_of_day/exam state already reset in MIDTERM_RESULTS handler
                 messages = ["Starting post-midterm half manually. Good luck!"]
                 current_screen_state = GAME_SCREEN
 
@@ -1962,8 +1996,10 @@ while running:
                 quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
             # Check for exam milestone after week replay finishes
             if week_replay_runner.done and not week_replay_runner.burnout_occurred:
+                # Use last_completed_week: current_week may already be incremented past the milestone
+                _runner_final_week = week_replay_runner.last_completed_week
                 # Runner stops at end-of-Sunday for week 7 (pre-mid) or week 15 (pre-finals)
-                if week_count == 7 and _exam_period_type == "":
+                if _runner_final_week == 7 and _exam_period_type == "":
                     course_manager.generate_midterm_schedule()
                     _exam_schedule[:] = course_manager.midterm_schedule
                     _exam_idx = 0
@@ -1971,14 +2007,17 @@ while running:
                     _exam_copy_to_all = False
                     _exam_prep_actions.clear()
                     copy_all_checkbox.checked = False
-                    
+
+                    # Save week-7 template for potential post-mid replay (replay-runner path)
+                    _pre_mid_week_template[:] = [list(d) for d in week_replay_runner.week_actions]
+
                     # Advance to Monday morning so action buttons aren't disabled at End of Day
                     day_count += 1
                     time_of_day = 8.0
                     day_over = False
-                    
+
                     current_screen_state = EXAM_SCREEN
-                elif week_count == 15 and _exam_period_type == "":
+                elif _runner_final_week == 15 and _exam_period_type == "":
                     course_manager.generate_final_schedule()
                     _exam_schedule[:] = course_manager.final_schedule
                     _exam_idx = 0
@@ -1986,7 +2025,7 @@ while running:
                     _exam_copy_to_all = False
                     _exam_prep_actions.clear()
                     copy_all_checkbox.checked = False
-                    
+
                     # Advance to Monday morning
                     day_count += 1
                     time_of_day = 8.0

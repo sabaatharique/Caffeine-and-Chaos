@@ -209,7 +209,7 @@ def save_game(student, course_manager,
         "exam_idx":         exam_idx,
         "exam_copy_to_all": exam_copy_to_all,
         "exam_prep_actions": _actions_to_serialisable(exam_prep_actions or []),
-        "pre_mid_week_template": [ [_actions_to_serialisable(day) for day in week] for week in (pre_mid_week_template or []) ],
+        "pre_mid_week_template": [_actions_to_serialisable(day) for day in (pre_mid_week_template or [])],
     }
     try:
         with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -257,8 +257,8 @@ def load_game(student, course_manager) -> dict | None:
         ]
         exam_prep_actions = _actions_from_serialisable(data.get("exam_prep_actions", []), course_manager)
         pre_mid_week_template = [
-            [ _actions_from_serialisable(day, course_manager) for day in week ]
-            for week in data.get("pre_mid_week_template", [])
+            _actions_from_serialisable(day, course_manager)
+            for day in data.get("pre_mid_week_template", [])
         ]
 
         return {
