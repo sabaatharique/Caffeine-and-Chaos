@@ -370,6 +370,52 @@ class Course:
         if pct >= 40:  return "D"
         return "F"
 
+    @staticmethod
+    def required_knowledge_for_pct(target_pct, sleep, health, stress, expected_knowledge, course_type="Theory"):
+        """
+        Calculate the raw knowledge required to hit a specific final percentage,
+        assuming 100% attendance and average stat efficiency.
+        """
+        # If target is lower than what attendance alone provides (10%)
+        # cap at the minimum to prevent negative knowledge targets
+        needed_from_assessments = max(0.0, target_pct - 10.0)
+
+        # Let x = progress * 100
+        # For Theory:
+        # quiz_avg  = 0.65*x + 0.15*sleep + 0.15*health - 0.25*stress
+        # mid_mark  = 0.70*x + 0.15*sleep + 0.15*health - 0.20*stress
+        # fin_mark  = 0.75*x + 0.10*sleep + 0.15*health - 0.20*stress
+        # total_from_assessments = 0.15*quiz_avg + 0.25*mid_mark + 0.50*fin_mark
+        #
+        # For Lab:
+        # eval_avg  = 0.60*x + 0.2*health - 0.3*stress
+        # mid_mark  = 0.70*x + 0.2*health - 0.2*stress
+        # fin_mark  = 0.75*x + 0.2*health - 0.2*stress
+        
+        if course_type == "Theory":
+            weight_x = 0.15 * 0.65 + 0.25 * 0.70 + 0.50 * 0.75
+            weight_sleep = 0.15 * 0.15 + 0.25 * 0.15 + 0.50 * 0.10
+            weight_health = 0.15 * 0.15 + 0.25 * 0.15 + 0.50 * 0.15
+            weight_stress = 0.15 * (-0.25) + 0.25 * (-0.20) + 0.50 * (-0.20)
+            
+            const_term = weight_sleep * sleep + weight_health * health + weight_stress * stress
+        else: # Lab
+            weight_x = 0.15 * 0.60 + 0.25 * 0.70 + 0.50 * 0.75
+            weight_health = 0.15 * 0.20 + 0.25 * 0.20 + 0.50 * 0.20
+            weight_stress = 0.15 * (-0.30) + 0.25 * (-0.20) + 0.50 * (-0.20)
+            
+            const_term = weight_health * health + weight_stress * stress
+
+        # We know: needed_from_assessments = weight_x * x + const_term
+        # Solving for x:
+        x = (needed_from_assessments - const_term) / weight_x
+        
+        # We need to map x back from percentage (x = progress * 100) back to actual knowledge
+        progress = x / 100.0
+        
+        # Don't return negative knowledge
+        return max(0.0, progress * expected_knowledge)
+
     def calculate_grade(self):
         """Compute grade point from final percentage. Returns None if incomplete."""
         pct = self.calculate_total_marks()

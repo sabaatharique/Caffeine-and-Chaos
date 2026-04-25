@@ -725,8 +725,8 @@ quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font
 # Exam screen / semester end continue button (centred)
 exam_continue_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 110, 120, 40, "Continue", button_font)
 sem_quit_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
-sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats",   button_font)
-sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "Results", button_font)
+sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats >",   button_font)
+sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "< Results", button_font)
 
 # Save-prompt buttons (shown in the SAVE_PROMPT overlay)
 _sp_y = HEIGHT // 2 + 20
@@ -742,6 +742,7 @@ replay_runner: ReplayRunner | None = None
 
 # Track the last non-prompt screen state so SAVE_PROMPT can render a backdrop
 _last_game_screen: str = MAIN_MENU
+_optimal_data = None
 
 
 def sweep_missed_assessments(c_manager, d_count, out_list):
@@ -961,6 +962,8 @@ while running:
             wizard.handle_event(event)
 
             if wizard.done:
+                # Apply target cgpa
+                student.target_cgpa = wizard.result.get("target_cgpa", 0.0)
                 # Apply the schedule grid to each Course object
                 course_manager.apply_schedule(wizard.result.get("schedule", {}))
                 course_manager.schedule_all_quizzes()
@@ -1489,10 +1492,28 @@ while running:
                 if sem_next_btn.clicked(event):
                     _sem_end_page = 1
                     _results_scroll_y = 0.0
-            else:
+                    sem_next_btn.text = "Optimal >"
+                    sem_prev_btn.text = "< Results"
+            elif _sem_end_page == 1:
+                if sem_next_btn.clicked(event):
+                    _sem_end_page = 2
+                    _results_scroll_y = 0.0
+                    sem_prev_btn.text = "< Stats"
+                    # Calculate optimal data once when navigating to the screen
+                    if _optimal_data is None:
+                        from screens import compute_optimal_path
+                        _optimal_data = compute_optimal_path(student, course_manager)
                 if sem_prev_btn.clicked(event):
                     _sem_end_page = 0
                     _results_scroll_y = 0.0
+                    sem_next_btn.text = "Stats >"
+            elif _sem_end_page == 2:
+                if sem_prev_btn.clicked(event):
+                    _sem_end_page = 1
+                    _results_scroll_y = 0.0
+                    sem_next_btn.text = "Optimal >"
+                    sem_prev_btn.text = "< Results"
+                    
             if sem_quit_btn.clicked(event):
                 running = False
 
@@ -1751,11 +1772,16 @@ while running:
                 screen, student, avg_k, sem_quit_btn, message_font,
                 course_manager, scroll_y=_results_scroll_y,
                 next_btn=sem_next_btn)
-        else:
+        elif _sem_end_page == 1:
             _results_content_h = semester_stats_screen(
                 screen, student, course_manager,
                 sem_prev_btn, sem_quit_btn,
-                scroll_y=_results_scroll_y)
+                scroll_y=_results_scroll_y,
+                next_btn=sem_next_btn)
+        elif _sem_end_page == 2:
+            from screens import semester_optimal_screen
+            _results_content_h = semester_optimal_screen(
+                screen, _optimal_data, sem_prev_btn, sem_quit_btn, scroll_y=_results_scroll_y)
 
     pygame.display.flip()
 

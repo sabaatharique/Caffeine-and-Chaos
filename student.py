@@ -4,6 +4,7 @@ import random
 class Student:
     def __init__(self, type_mult: float = 1.0):
         self.type_mult = type_mult
+        self.target_cgpa = 0.0
 
         # Status bars
         self.sleep = 90

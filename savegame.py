@@ -21,6 +21,7 @@ def _default_stats() -> dict:
 def _student_to_dict(student) -> dict:
     return {
         "type_mult": student.type_mult,
+        "target_cgpa": student.target_cgpa,
         "sleep": student.sleep,
         "health": student.health,
         "stress": student.stress,
@@ -41,6 +42,7 @@ def _student_to_dict(student) -> dict:
 def _student_from_dict(data: dict, student):
     """Restore student attributes from a dict (in-place)."""
     student.type_mult = data.get("type_mult", 1.0)
+    student.target_cgpa = data.get("target_cgpa", 0.0)
     student.sleep = data.get("sleep", 90)
     student.health = data.get("health", 80)
     student.stress = data.get("stress", 30)
@@ -50,7 +52,7 @@ def _student_from_dict(data: dict, student):
     student.attendance = data.get("attendance", 0)
     student.consecutive_stress_days = data.get("consecutive_stress_days", 0)
     student.burnout_days_remaining = data.get("burnout_days_remaining", 5)
-    student.is_sick             = data.get("is_sick", False)
+    student.is_sick = data.get("is_sick", False)
     student.sick_days_remaining = data.get("sick_days_remaining", 0)
     student._stress_history     = data.get("stress_history", [])
     student._health_history     = data.get("health_history", [])
