@@ -8,10 +8,14 @@ from environment import DAY_START, DAY_END, format_time, draw_clock, outage_over
 from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
                 QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
-                QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox)
+                QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox,
+                Checkbox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
                      exam_screen, midterm_results_screen, semester_end_screen,
-                     semester_stats_screen)
+                     semester_stats_screen,
+                     exam_schedule_screen, exam_prep_screen,
+                     exam_taking_screen)
+from environment import MIDTERM_EXAM_WEEKS, FINAL_EXAM_WEEKS
 from savegame import save_game, load_game, delete_save, save_exists
 
 # Window & clock
@@ -451,13 +455,28 @@ class WeekReplayRunner:
                 self.burnout_occurred = True
                 self.done = True
                 return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
-            
+
             self.day_in_week += 1
+
+            # Stop after Friday of the last class week before each exam period
+            # (week 7 = Friday before midterm; week 15 = Friday before finals)
+            _completed_diw  = self.day_in_week   # now 1-based after increment … hmm
+            _completed_week = self.current_week
+            _is_last_pre_exam = (_completed_week in (7, 15))
+            _finished_friday  = (self.day_in_week == 5)  # 5th day of week = Friday
+            if _is_last_pre_exam and _finished_friday:
+                # Stop cleanly — main loop will trigger exam schedule flow
+                self.done = True
+                stop_msg = (f"Week {_completed_week} Friday done — stopping replay before exam period.")
+                self.msgs.append(stop_msg)
+                return day_msgs + [stop_msg], alert_info
+
             # Only start next day now if there are more days this week;
             # otherwise let the week-boundary tick handle it cleanly.
             if self.day_in_week < len(self.week_actions):
                 self._start_new_day()
             return day_msgs + [f"Day {self.current_day} completed (fast-forward)."], alert_info
+
 
         action, hours, data = actions[self.action_idx]
         action_start = self.time_cursor
@@ -604,6 +623,9 @@ SETUP_SCREEN = "setup_screen"
 GAME_SCREEN = "game_screen"
 DAY_END_SCREEN = "day_end_screen"
 EXAM_SCREEN = "exam_screen"
+EXAM_SCHEDULE_SCREEN = "exam_schedule_screen"
+EXAM_PREP_SCREEN = "exam_prep_screen"
+EXAM_TAKING_SCREEN = "exam_taking_screen"
 MIDTERM_RESULTS_SCREEN = "midterm_results_screen"
 SEMESTER_END_SCREEN = "semester_end_screen"
 SAVE_PROMPT = "save_prompt"
@@ -616,6 +638,15 @@ _sem_end_page = 0   # 0 = results page, 1 = stats page
 
 # Semester tracking
 exam_type = "mid"   # "mid" or "final"
+
+# Exam period state
+_exam_schedule: list = []    # copy of midterm or final schedule
+_exam_idx: int = 0      # index of current exam in _exam_schedule
+_recent_exam_mark: float = 0.0  # holds the mark just obtained for EXAM_RESULT_SCREEN
+_exam_prep_actions: list = []    # day_actions recorded for exam 0's prep
+_exam_copy_to_all: bool = False # "Do the same for all?" checkbox state
+_exam_period_type: str = ""     # "mid" or "final"
+_exam_prep_replay_runner = None    # ExamPrepReplayRunner instance
 
 
 def get_semester_phase(wk: int) -> str:
@@ -724,6 +755,7 @@ quit_btn = Button(_gap * 4 + _btn_w * 3, _btn_y, _btn_w, 40, "Quit", button_font
 
 # Exam screen / semester end continue button (centred)
 exam_continue_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 110, 120, 40, "Continue", button_font)
+skip_exam_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 160, 120, 40, "Skip (0)",  button_font)
 sem_quit_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
 sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats >",   button_font)
 sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "< Results", button_font)
@@ -740,9 +772,135 @@ week_repeat_box = NumberBox(message_font, input_font)
 messages: list[str] = []
 replay_runner: ReplayRunner | None = None
 
+# Copy-all checkbox for EXAM_PREP_SCREEN
+copy_all_checkbox = Checkbox(0, 0, "Do the same for all remaining exams?", input_font)
+
 # Track the last non-prompt screen state so SAVE_PROMPT can render a backdrop
 _last_game_screen: str = MAIN_MENU
 _optimal_data = None
+
+
+class ExamPrepReplayRunner:
+    """
+    Replays recorded prep-day actions for one or more exam lead-ups automatically.
+    """
+    def __init__(self, student, course_manager, prep_actions: list,
+                 exam_entries: list, start_day: int):
+        self.student = student
+        self.course_manager = course_manager
+        self.prep_actions = list(prep_actions)   # single day's actions to repeat
+        self.exam_entries = list(exam_entries)   # remaining exams (including current)
+        self.exam_idx = 0
+        self.current_day = start_day
+        self.action_idx = 0
+        self.time_cursor = float(DAY_START)
+        self.done = False
+        self.pending_alert = None
+        self.msgs = []
+        self._day_outages = wifi_failure_event()
+
+    def _start_new_day(self):
+        self.current_day += 1
+        self.action_idx   = 0
+        self.time_cursor  = float(DAY_START)
+        self._day_outages = wifi_failure_event()
+
+    def _exam_for_current_exam_idx(self):
+        if self.exam_idx < len(self.exam_entries):
+            return self.exam_entries[self.exam_idx]
+        return None
+
+    def _on_exam_day(self):
+        entry = self._exam_for_current_exam_idx()
+        if entry is None:
+            return False
+        wk  = ((self.current_day - 1) // 7) + 1
+        diw = ((self.current_day - 1) % 7) + 1   # 1-based
+        return wk == entry["week"] and (diw - 1) == entry["day_idx"]
+
+    def tick(self):
+        """Advance one action; return (msgs, alert_info). Sets done=True on exam day."""
+        if self.done:
+            return [], None
+        if self.exam_idx >= len(self.exam_entries):
+            self.done = True
+            return [], None
+
+        # If we've reached the exam day, pause and signal main loop
+        if self._on_exam_day():
+            self.done = True
+            return [f"Exam day reached: {self._exam_for_current_exam_idx()['course'].name}"], None
+
+        # All prep actions for this day done → end of day
+        if self.action_idx >= len(self.prep_actions):
+            day_msgs = self.student.end_of_day()
+            self.msgs.extend(day_msgs)
+            alert_info = None
+            if any("[SICK!]" in m for m in day_msgs):
+                alert_info = (
+                    "YOU'RE SICK!",
+                    "You've fallen ill!  Health -10, Stress +10.\n"
+                    "Efficiency is halved and classes are blocked.\n"
+                    "REST UP OR YOUR STATS WILL CRUMBLE!",
+                    "sickness"
+                )
+            elif any("[RECOVERED]" in m for m in day_msgs):
+                alert_info = (
+                    "RECOVERED!",
+                    "You've fought off the illness and are back to full efficiency.\n"
+                    "Your learning and attendance potential are restored.\n"
+                    "STAY VIGILANT!",
+                    "recovery"
+                )
+            self._start_new_day()
+            # Check exam day after advancing
+            if self._on_exam_day():
+                self.done = True
+            return day_msgs, alert_info
+
+        action, hours, data = self.prep_actions[self.action_idx]
+        action_start = self.time_cursor
+        action_end   = self.time_cursor + hours
+
+        new_msgs = []
+        overlap  = outage_overlap(self._day_outages, action_start, action_end)
+        wifi_on  = (overlap > 0 and action == 'study')
+        if overlap > 0:
+            self.student.stats["hours_wifi_outage"] += overlap
+
+        if action == 'study' and self.student.action_status['study']:
+            target = data if data else next(
+                (c for c in self.course_manager.courses if c.course_type == "Theory"),
+                self.course_manager.courses[0]
+            )
+            avg = self.course_manager.get_average_knowledge()
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.study(course=target, hours=hours,
+                                                avg_knowledge=avg, wifi_penalty=wifi_on))
+        elif action == 'sleep' and self.student.action_status['sleep']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.rest(hours=hours))
+        elif action == 'relax' and self.student.action_status['relax']:
+            new_msgs.extend(self.student.apply_hunger_decay(hours))
+            new_msgs.extend(self.student.take_break(hours=hours))
+        elif action == 'eat' and self.student.action_status['eat']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.5))
+            new_msgs.extend(self.student.eat())
+        elif action == 'coffee' and self.student.action_status['coffee']:
+            new_msgs.extend(self.student.apply_hunger_decay(0.25))
+            new_msgs.extend(self.student.drink_coffee())
+        # No attend_class during exam weeks
+
+        self.time_cursor  = action_end
+        self.action_idx  += 1
+        self.msgs.extend(new_msgs)
+        pygame.time.wait(100)
+        return new_msgs, None
+
+    def last_msgs(self, n=5):
+        return self.msgs[-n:]
+
+
 
 
 def sweep_missed_assessments(c_manager, d_count, out_list):
@@ -834,13 +992,22 @@ while running:
         eat_btn.enabled = student.action_status['eat'] and remaining_hours >= 0.5
         drink_coffee_btn.enabled = student.action_status['coffee'] and remaining_hours >= 0.25
 
-    # Phase-start flow constraints (week 1 = start of semester; week 8 = start of post-mid)
-    if week_count in (1, 8) and day_in_week == 7:  # Sunday of phase week 1: can't repeat day
+    # Phase-start flow constraints
+    _in_exam_period = _exam_period_type in ("mid", "final")
+    if week_count in (1, 8) and day_in_week == 7 and not _in_exam_period:  # Sunday of phase week 1
+        repeat_btn.enabled = False
+    elif _in_exam_period and _exam_idx < len(_exam_schedule):
+        # Allow repeat only if there are prep days left before next exam
+        _next_exam_entry = _exam_schedule[_exam_idx]
+        _next_exam_abs = (_next_exam_entry["week"] - 1) * 7 + _next_exam_entry["day_idx"] + 1
+        repeat_btn.enabled = not burnout_active and (_next_exam_abs - day_count - 1 > 0)
+    elif _in_exam_period:
         repeat_btn.enabled = False
     else:
         repeat_btn.enabled = not burnout_active
-    # Repeat Week: enabled once a full week (day 7) is complete
-    repeat_week_btn.enabled = not burnout_active and day_in_week == 7
+    # Repeat Week: always disabled during exam period
+    repeat_week_btn.enabled = (not burnout_active and day_in_week == 7
+                                and not _in_exam_period)
 
     # Event handling
     for event in pygame.event.get():
@@ -869,7 +1036,6 @@ while running:
         if academic_dashboard.handle_event(event):
             continue
 
-        # Save Prompt
         if current_screen_state == SAVE_PROMPT:
             if save_yes_btn.clicked(event):
                 save_game(
@@ -880,6 +1046,10 @@ while running:
                     classes_resolved=_classes_resolved,
                     quizzes_resolved=_quizzes_resolved_today,
                     attend_all_today=class_interrupt_box.attend_all,
+                    exam_period_type=_exam_period_type,
+                    exam_idx=_exam_idx,
+                    exam_copy_to_all=_exam_copy_to_all,
+                    exam_prep_actions=_exam_prep_actions,
                 )
                 running = False
             if save_no_btn.clicked(event):
@@ -918,6 +1088,18 @@ while running:
                     daily_outages = wifi_failure_event()
                     messages = [f"Welcome back! Week {week_count} - {day_name(day_in_week)} (Day {day_count})"]
 
+                    # Restore exam period state
+                    _exam_period_type = loaded.get("exam_period_type", "")
+                    _exam_idx = loaded.get("exam_idx", 0)
+                    _exam_copy_to_all = loaded.get("exam_copy_to_all", False)
+                    _exam_prep_actions[:] = loaded.get("exam_prep_actions", [])
+                    copy_all_checkbox.checked = _exam_copy_to_all
+                    # Reconstruct _exam_schedule from course_manager
+                    if _exam_period_type == "mid":
+                        _exam_schedule[:] = course_manager.midterm_schedule
+                    elif _exam_period_type == "final":
+                        _exam_schedule[:] = course_manager.final_schedule
+
                     # Guard for old saves: generate quizzes if missing
                     for c in course_manager.courses:
                         if c.course_type == "Theory" and not c.scheduled_quizzes:
@@ -926,7 +1108,17 @@ while running:
                             course_manager.schedule_all_lab_assessments()
 
                     # Route to the correct screen based on saved state
-                    if week_count > 15:
+                    if week_count in FINAL_EXAM_WEEKS and _exam_period_type == "final":
+                        if _exam_idx < len(_exam_schedule):
+                            current_screen_state = EXAM_PREP_SCREEN
+                        else:
+                            current_screen_state = SEMESTER_END_SCREEN
+                    elif week_count in MIDTERM_EXAM_WEEKS and _exam_period_type == "mid":
+                        if _exam_idx < len(_exam_schedule):
+                            current_screen_state = EXAM_PREP_SCREEN
+                        else:
+                            current_screen_state = MIDTERM_RESULTS_SCREEN
+                    elif week_count > 15:
                         # Semester is over — generate finals if not already done and go to results
                         for c in course_manager.courses:
                             if c.course_type == "Theory" and c.final_mark is None:
@@ -949,6 +1141,7 @@ while running:
                     else:
                         _last_game_screen = GAME_SCREEN
                         current_screen_state = GAME_SCREEN
+
 
         # Setup Screen
         elif current_screen_state == SETUP_SCREEN:
@@ -1135,14 +1328,16 @@ while running:
                 messages.extend(new_messages)
                 messages = messages[-5:]
 
-            # Quiz interrupt trigger (GAME_SCREEN, weekdays only)
+            # Quiz interrupt trigger (GAME_SCREEN, weekdays only, not during exam period)
             if (current_screen_state == GAME_SCREEN
                     and not day_over
                     and not class_interrupt_box.active   # don't stack interrupts
                     and not quiz_result_box.active
                     and not alert_box.active
                     and not input_box.active
-                    and day_in_week <= 5):               # no quizzes on weekends
+                    and day_in_week <= 5
+                    and week_count not in MIDTERM_EXAM_WEEKS
+                    and week_count not in FINAL_EXAM_WEEKS):  # no quizzes during exam period
 
                 for course in course_manager.courses:
                     if course.course_type != "Theory":
@@ -1184,7 +1379,7 @@ while running:
                         messages = messages[-5:]   # keep message list tidy
                         break   # only one quiz popup at a time
 
-            # Lab assessment interrupt trigger (GAME_SCREEN, weekdays only)
+            # Lab assessment interrupt trigger (GAME_SCREEN, weekdays only, not during exam period)
             if (current_screen_state == GAME_SCREEN
                     and not day_over
                     and not class_interrupt_box.active
@@ -1192,7 +1387,9 @@ while running:
                     and not lab_assessment_interrupt_box.active
                     and not alert_box.active
                     and not input_box.active
-                    and day_in_week <= 5):
+                    and day_in_week <= 5
+                    and week_count not in MIDTERM_EXAM_WEEKS
+                    and week_count not in FINAL_EXAM_WEEKS):
 
                 for course in course_manager.courses:
                     if course.course_type != "Lab":
@@ -1373,6 +1570,13 @@ while running:
                 if continue_btn.clicked(event):
                     replay_runner = None
                     week_replay_runner = None
+                    # During exam prep for the FIRST exam, keep the prep template up-to-date.
+                    # day_actions holds today's completed actions — save them before clearing
+                    # so that _exam_prep_actions is never empty when the exam day arrives.
+                    if (_exam_period_type in ("mid", "final")
+                            and _exam_idx == 0
+                            and day_actions):
+                        _exam_prep_actions[:] = list(day_actions)
                     # Save or reset week_actions based on current day
                     if day_in_week == 7:      # completed last day of the week
                         week_actions.clear()  # fresh start for next week
@@ -1397,27 +1601,43 @@ while running:
                     _lab_assessments_resolved_today.clear()
                     class_interrupt_box.attend_all = False
                     # --- Semester milestone check (boundary-crossing) ---
-                    if week_count < 8 and new_wk >= 8:    # crossed into post-mid → mid exam
-                        exam_type = "mid"
+                    if week_count < 8 and new_wk >= 8 and _exam_period_type == "":    # crossed into mid-exam period (first time only)
+                        course_manager.generate_midterm_schedule()
+                        _exam_schedule[:] = course_manager.midterm_schedule
+                        _exam_idx = 0
+                        _exam_period_type = "mid"
+                        _exam_copy_to_all = False
+                        _exam_prep_actions.clear()
+                        copy_all_checkbox.checked = False
                         current_screen_state = EXAM_SCREEN
-                    elif week_count < 16 and new_wk >= 16:  # crossed out of week 15 → final exam
-                        exam_type = "final"
+                    elif week_count < 16 and new_wk >= 16 and _exam_period_type == "":  # crossed into final-exam period (first time only)
+                        course_manager.generate_final_schedule()
+                        _exam_schedule[:] = course_manager.final_schedule
+                        _exam_idx = 0
+                        _exam_period_type = "final"
+                        _exam_copy_to_all = False
+                        _exam_prep_actions.clear()
+                        copy_all_checkbox.checked = False
                         current_screen_state = EXAM_SCREEN
                     else:
                         current_screen_state = GAME_SCREEN
 
+
                 if repeat_btn.clicked(event):
                     if day_actions:
-                        # Cap repeats based on week/day-of-week to enforce game flow
-                        SEMESTER_LAST_DAY = 7 * 15  # day 105 = end of week 15
-                        # Unified capping logic for all weeks:
-                        # Weekdays (1-5) can repeat up to Friday; Saturday (6) can repeat into Sunday; Sunday (7) zero.
-                        if day_in_week <= 5:
-                            max_rep = 5 - day_in_week
-                        elif day_in_week == 6:
-                            max_rep = 1
+                        if _exam_period_type in ("mid", "final") and _exam_idx < len(_exam_schedule):
+                            # During exam period: cap repeats to days until the next exam
+                            _next_exam = _exam_schedule[_exam_idx]
+                            _next_exam_day = (_next_exam["week"] - 1) * 7 + _next_exam["day_idx"] + 1
+                            max_rep = max(0, _next_exam_day - day_count - 1)  # -1: today already used
                         else:
-                            max_rep = 0
+                            # Normal semester: cap to end of working week
+                            if day_in_week <= 5:
+                                max_rep = 5 - day_in_week
+                            elif day_in_week == 6:
+                                max_rep = 1
+                            else:
+                                max_rep = 0
                         if max_rep > 0:
                             repeat_box.open("Repeat for how many more days?", max_value=max_rep)
                         else:
@@ -1426,7 +1646,9 @@ while running:
                         messages = ["No actions recorded to repeat."]
 
                 if repeat_week_btn.clicked(event) and day_in_week == 7:
-                    if week_actions or day_actions:
+                    if _exam_period_type in ("mid", "final"):
+                        messages = ["Week repeats are disabled during exam period."]
+                    elif week_actions or day_actions:
                         # Build full 7-day snapshot (previous 6 days + today)
                         _full_week_snapshot = list(week_actions) + [list(day_actions)]
                         max_wk = _max_week_repeats(week_count)
@@ -1446,36 +1668,126 @@ while running:
         # Exam Screen
         elif current_screen_state == EXAM_SCREEN:
             if exam_continue_btn.clicked(event):
-                if exam_type == "final":
-                    # Apply 85% attendance rule: barred students get 0 on finals
-                    for c in course_manager.courses:
-                        if c.course_type == "Theory":
-                            if not c.is_attendance_eligible():
-                                c.final_mark = 0
-                            else:
-                                c.generate_final_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
-                        elif c.course_type == "Lab":
-                            if not c.is_attendance_eligible():
-                                c.lab_final = 0
-                            else:
-                                c.generate_lab_final(week_count, student.stress, student.health, student.is_sick)
-                    _results_scroll_y = 0.0
-                    _sem_end_page = 0
-                    current_screen_state = SEMESTER_END_SCREEN
+                # Splash screen dismissed, proceed to the detailed schedule
+                current_screen_state = EXAM_SCHEDULE_SCREEN
+
+        # Exam Schedule Screen — shown once at start of each exam period
+        elif current_screen_state == EXAM_SCHEDULE_SCREEN:
+            if exam_continue_btn.clicked(event):
+                current_screen_state = EXAM_PREP_SCREEN
+
+        # Exam Prep Screen — shown before each individual exam
+        elif current_screen_state == EXAM_PREP_SCREEN:
+            # Checkbox only shown for exam 1 onward
+            if _exam_idx >= 1:
+                copy_all_checkbox.handle_event(event)
+                _exam_copy_to_all = copy_all_checkbox.checked
+
+            if exam_continue_btn.clicked(event):
+                # "Begin Prep" — if copy_all is set and we already have a prep template,
+                # launch the auto-replay runner immediately instead of going manual.
+                if _exam_copy_to_all and _exam_prep_actions and _exam_idx >= 1:
+                    _exam_prep_replay_runner = ExamPrepReplayRunner(
+                        student, course_manager,
+                        _exam_prep_actions,
+                        _exam_schedule[_exam_idx:],
+                        day_count
+                    )
+                    day_over = True
+                    current_screen_state = DAY_END_SCREEN
                 else:
-                    # Mid exam done → generate mid marks then show midterm results
-                    for c in course_manager.courses:
-                        if c.course_type == "Theory":
-                            c.generate_mid_mark(week_count, student.stress, student.sleep, student.health, student.is_sick)
-                        elif c.course_type == "Lab":
-                            c.generate_lab_mid(week_count, student.stress, student.health, student.is_sick)
-                    _results_scroll_y = 0.0
-                    current_screen_state = MIDTERM_RESULTS_SCREEN
+                    # Manual prep — enter GAME_SCREEN for lead-up days
+                    day_over = False
+                    current_game_bg = bg_map['default']
+                    daily_outages = wifi_failure_event()
+                    todays_classes.clear()
+                    _classes_resolved.clear()
+                    _quizzes_resolved_today.clear()
+                    _lab_assessments_resolved_today.clear()
+                    class_interrupt_box.attend_all = False
+                    current_screen_state = GAME_SCREEN
+
+        # Exam Taking Screen — shown on the exam day itself
+        elif current_screen_state == EXAM_TAKING_SCREEN:
+            def _resolve_exam(skip=False):
+                """Take or skip the current exam, then advance to next prep or results."""
+                global _exam_idx, _exam_prep_replay_runner, day_over, current_screen_state
+                global _results_scroll_y, _sem_end_page
+                entry  = _exam_schedule[_exam_idx]
+                course = entry["course"]
+                if skip:
+                    # Skip → 0 marks
+                    if _exam_period_type == "mid":
+                        course.mid_mark = 0.0
+                    else:
+                        course.final_mark = 0.0
+                else:
+                    if _exam_period_type == "mid":
+                        course.generate_mid_mark(
+                            week_count, student.stress, student.sleep, student.health, student.is_sick)
+                    else:
+                        if not course.is_attendance_eligible():
+                            course.final_mark = 0.0
+                        else:
+                            course.generate_final_mark(
+                                week_count, student.stress, student.sleep, student.health, student.is_sick)
+                
+                _exam_idx += 1
+                is_last = (_exam_idx >= len(_exam_schedule))
+                if is_last:
+                    # All exams done → go straight to period results
+                    if _exam_period_type == "mid":
+                        for c in course_manager.courses:
+                            if c.course_type == "Lab" and c.lab_mid is None:
+                                c.generate_lab_mid(week_count, student.stress, student.health, student.is_sick)
+                        _results_scroll_y = 0.0
+                        current_screen_state = MIDTERM_RESULTS_SCREEN
+                    else:
+                        for c in course_manager.courses:
+                            if c.course_type == "Lab" and c.lab_final is None:
+                                if not c.is_attendance_eligible():
+                                    c.lab_final = 0.0
+                                else:
+                                    c.generate_lab_final(week_count, student.stress, student.health, student.is_sick)
+                        _results_scroll_y = 0.0
+                        _sem_end_page = 0
+                        current_screen_state = SEMESTER_END_SCREEN
+                else:
+                    # Advance to the next exam's prep day — resume from 3 PM on exam day
+                    time_of_day = 15.0   # 3:00 PM
+                    day_over = False
+                    daily_outages = wifi_failure_event()
+                    todays_classes.clear()
+                    _classes_resolved.clear()
+                    _quizzes_resolved_today.clear()
+                    _lab_assessments_resolved_today.clear()
+                    class_interrupt_box.attend_all = False
+                    current_game_bg = bg_map['default']
+                    if _exam_copy_to_all and _exam_prep_actions:
+                        # Replay prep for remaining exams; runner stops on each exam day
+                        _exam_prep_replay_runner = ExamPrepReplayRunner(
+                            student, course_manager,
+                            _exam_prep_actions,
+                            _exam_schedule[_exam_idx:],
+                            day_count
+                        )
+                        day_over = True
+                        current_screen_state = DAY_END_SCREEN
+                    else:
+                        # Manual: show prep screen for next exam
+                        current_screen_state = EXAM_PREP_SCREEN
+
+            if exam_continue_btn.clicked(event):
+                _resolve_exam(skip=False)
+            if skip_exam_btn.clicked(event):
+                _resolve_exam(skip=True)
 
         # Midterm Results Screen
         elif current_screen_state == MIDTERM_RESULTS_SCREEN:
             if exam_continue_btn.clicked(event):
-                # Return to game for the post-midterm half
+                # Return to game for the post-midterm half — resume at Monday morning, Week 8
+                day_count = 50       # Day 50 = Week 8 Monday
+                time_of_day = 8.0    # 8:00 AM
                 day_over = False
                 current_game_bg = bg_map['default']
                 daily_outages = wifi_failure_event()
@@ -1484,6 +1796,10 @@ while running:
                 _quizzes_resolved_today.clear()
                 _lab_assessments_resolved_today.clear()
                 class_interrupt_box.attend_all = False
+                # Clear exam period so day-detection doesn't re-fire
+                _exam_period_type = ""
+                _exam_idx = 0
+                _exam_schedule.clear()
                 current_screen_state = GAME_SCREEN
 
         # Semester End Screen
@@ -1608,21 +1924,78 @@ while running:
                 quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
             # Check for exam milestone after week replay finishes
             if week_replay_runner.done and not week_replay_runner.burnout_occurred:
-                # current_week is the last week the runner was in (7 or 15)
-                if week_count == 7 and day_in_week == 7:
-                    exam_type = "mid"
+                # Runner stops at end-of-Sunday for week 7 (pre-mid) or week 15 (pre-finals)
+                if week_count == 7 and _exam_period_type == "":
+                    course_manager.generate_midterm_schedule()
+                    _exam_schedule[:] = course_manager.midterm_schedule
+                    _exam_idx = 0
+                    _exam_period_type = "mid"
+                    _exam_copy_to_all = False
+                    _exam_prep_actions.clear()
+                    copy_all_checkbox.checked = False
+                    
+                    # Advance to Monday morning so action buttons aren't disabled at End of Day
+                    day_count += 1
+                    time_of_day = 8.0
+                    day_over = False
+                    
                     current_screen_state = EXAM_SCREEN
-                elif week_count == 15 and day_in_week == 7:
-                    exam_type = "final"
+                elif week_count == 15 and _exam_period_type == "":
+                    course_manager.generate_final_schedule()
+                    _exam_schedule[:] = course_manager.final_schedule
+                    _exam_idx = 0
+                    _exam_period_type = "final"
+                    _exam_copy_to_all = False
+                    _exam_prep_actions.clear()
+                    copy_all_checkbox.checked = False
+                    
+                    # Advance to Monday morning
+                    day_count += 1
+                    time_of_day = 8.0
+                    day_over = False
+                    
                     current_screen_state = EXAM_SCREEN
 
-    # Class interrupt trigger (GAME_SCREEN, weekdays only)
+    # Active ExamPrepReplayRunner tick (DAY_END_SCREEN during exam period)
+    if (current_screen_state == DAY_END_SCREEN
+            and _exam_prep_replay_runner is not None
+            and not _exam_prep_replay_runner.done
+            and not alert_box.active):
+        step_msgs, alert_info = _exam_prep_replay_runner.tick()
+        if alert_info:
+            alert_box.open(*alert_info)
+        messages = _exam_prep_replay_runner.last_msgs()
+        day_count = _exam_prep_replay_runner.current_day
+        time_of_day = _exam_prep_replay_runner.time_cursor
+        sick_active = student.is_sick
+        if _exam_prep_replay_runner.done:
+            # Runner paused on exam day — switch to taking screen
+            _exam_prep_replay_runner = None
+            current_screen_state = EXAM_TAKING_SCREEN
+
+    # Exam-day detection (GAME_SCREEN → EXAM_TAKING_SCREEN)
+    if (current_screen_state == GAME_SCREEN
+            and _exam_period_type in ("mid", "final")
+            and _exam_idx < len(_exam_schedule)):
+        _entry = _exam_schedule[_exam_idx]
+        _ent_wk = _entry["week"]
+        _ent_diw = _entry["day_idx"] + 1   # 1-based
+        _cur_wk = ((day_count - 1) // 7) + 1
+        _cur_diw = ((day_count - 1) % 7) + 1
+        if _cur_wk == _ent_wk and _cur_diw == _ent_diw:
+            # It's exam day — save this day's actions as prep template for first exam
+            if _exam_idx == 0 and not _exam_prep_actions:
+                _exam_prep_actions[:] = list(day_actions)
+            current_screen_state = EXAM_TAKING_SCREEN
+
+    # Class interrupt trigger (GAME_SCREEN, weekdays only, not during exam period)
     if (current_screen_state == GAME_SCREEN
             and not day_over
             and not class_interrupt_box.active
             and not alert_box.active
             and not input_box.active
-            and not repeat_box.active):
+            and not repeat_box.active
+            and _exam_period_type == ""):
 
         _trigger_diw = ((day_count - 1) % 7) + 1
         _trigger_week = ((day_count - 1) // 7) + 1
@@ -1717,9 +2090,33 @@ while running:
         game_screen(screen, current_game_bg, student, bars, game_buttons, messages, message_font, bar_space)
         # Manually draw bars[0] (Knowledge) with the calculated average
         bars[0].draw(screen, avg_k)
-        
+
+        # Compute display week — during exam period show "Exam Week N" (1-based within period)
+        if _exam_period_type == "mid" and _exam_schedule:
+            from environment import MIDTERM_EXAM_WEEKS
+            _exam_disp_wk = week_count - MIDTERM_EXAM_WEEKS[0] + 1
+            _disp_week_label = f"Exam Wk {_exam_disp_wk}"
+        elif _exam_period_type == "final" and _exam_schedule:
+            from environment import FINAL_EXAM_WEEKS
+            _exam_disp_wk = week_count - FINAL_EXAM_WEEKS[0] + 1
+            _disp_week_label = f"Exam Wk {_exam_disp_wk}"
+        else:
+            _disp_week_label = None
+
         draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
-                   week_count=week_count, day_in_week=day_in_week)
+                   week_count=week_count, day_in_week=day_in_week,
+                   exam_week_label=_disp_week_label)
+
+        # Next-exam info strip (below clock, during exam period)
+        if _exam_period_type in ("mid", "final") and _exam_idx < len(_exam_schedule):
+            _ne = _exam_schedule[_exam_idx]
+            from environment import DAYS_OF_WEEK
+            _ne_day_name = DAYS_OF_WEEK[_ne["day_idx"]]
+            _ne_days_left = (_ne["week"] - 1) * 7 + _ne["day_idx"] + 1 - day_count
+            _ne_text = f"Next: {_ne['course'].name}  [{_ne_days_left}d left]"
+            _ne_surf = date_font.render(_ne_text, True, (255, 255, 0))
+            _ne_x = screen.get_width() - bar_space - _ne_surf.get_width() - 10
+            screen.blit(_ne_surf, (_ne_x, 190))
 
         input_box.draw(screen)
         repeat_box.draw(screen)
@@ -1736,6 +2133,17 @@ while running:
 
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
+        # Compute exam week label (same logic as GAME_SCREEN)
+        if _exam_period_type == "mid" and _exam_schedule:
+            from environment import MIDTERM_EXAM_WEEKS
+            _de_exam_wk = week_count - MIDTERM_EXAM_WEEKS[0] + 1
+            _de_week_label = f"Exam Wk {_de_exam_wk}"
+        elif _exam_period_type == "final" and _exam_schedule:
+            from environment import FINAL_EXAM_WEEKS
+            _de_exam_wk = week_count - FINAL_EXAM_WEEKS[0] + 1
+            _de_week_label = f"Exam Wk {_de_exam_wk}"
+        else:
+            _de_week_label = None
         day_end_screen(
             screen, current_game_bg, student, bars, game_buttons,
             messages, message_font, bar_space,
@@ -1748,6 +2156,7 @@ while running:
             repeat_week_btn=repeat_week_btn,
             week_repeat_box=week_repeat_box,
             sick_active=sick_active,
+            exam_week_label=_de_week_label,
         )
         stats_btn.draw(screen)
         academic_dashboard.draw(screen, course_manager, week_count)
@@ -1756,8 +2165,36 @@ while running:
         lab_assessment_interrupt_box.draw(screen)  # replay lab Take/Skip prompt
 
     elif current_screen_state == EXAM_SCREEN:
-        exam_screen(screen, exam_type, exam_continue_btn, message_font,
+        exam_screen(screen, _exam_period_type, exam_continue_btn, message_font,
                     course_manager=course_manager)
+
+    elif current_screen_state == EXAM_SCHEDULE_SCREEN:
+        if _exam_schedule:
+            exam_schedule_screen(
+                screen, _exam_period_type, _exam_schedule,
+                exam_continue_btn, message_font)
+
+    elif current_screen_state == EXAM_PREP_SCREEN:
+        if _exam_idx < len(_exam_schedule):
+            _cur_entry = _exam_schedule[_exam_idx]
+            _prep_wk = _cur_entry["week"]
+            _prep_diw = _cur_entry["day_idx"] + 1
+            _prep_day_num = (_prep_wk - 1) * 7 + _prep_diw
+            _days_until = max(0, _prep_day_num - day_count)
+            exam_prep_screen(
+                screen, _cur_entry, _days_until,
+                _exam_idx, len(_exam_schedule),
+                _exam_copy_to_all, copy_all_checkbox,
+                exam_continue_btn, message_font)
+
+    elif current_screen_state == EXAM_TAKING_SCREEN:
+        if _exam_idx < len(_exam_schedule):
+            exam_taking_screen(
+                screen, _exam_schedule[_exam_idx],
+                _exam_period_type,
+                exam_continue_btn, skip_exam_btn,
+                message_font)
+
 
     elif current_screen_state == MIDTERM_RESULTS_SCREEN:
         avg_k = course_manager.get_average_knowledge()

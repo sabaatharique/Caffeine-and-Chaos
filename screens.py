@@ -86,7 +86,7 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
                    repeat_box, alert_box,
                    week_count=1, day_in_week=1,
                    repeat_week_btn=None, week_repeat_box=None,
-                   sick_active=False):
+                   sick_active=False, exam_week_label=None):
     """Draw the full day-end overlay (background + dim + summary + buttons)."""
     WIDTH, HEIGHT = screen.get_width(), screen.get_height()
 
@@ -96,7 +96,8 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
 
     # Clock before overlay so it gets dimmed with everything else
     draw_clock_fn(screen, clock_font, date_font, time_of_day, day_count, bar_space,
-                  week_count=week_count, day_in_week=day_in_week)
+                  week_count=week_count, day_in_week=day_in_week,
+                  exam_week_label=exam_week_label)
 
     # Dark overlay
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -122,11 +123,13 @@ def day_end_screen(screen, background_image, student, bars, game_buttons,
 
     # Week subtitle
     week_label_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    _disp_wk = exam_week_label if exam_week_label else f"Week {week_count}"
+    
     if day_in_week == 7:
-        wk_label = f"Week {week_count}, {day_name(day_in_week)} - Week Complete!"
+        wk_label = f"{_disp_wk}, {day_name(day_in_week)} - Week Complete!"
         wk_color = (120, 255, 160)
     else:
-        wk_label = f"Week {week_count}, {day_name(day_in_week)}"
+        wk_label = f"{_disp_wk}, {day_name(day_in_week)}"
         wk_color = (180, 230, 255)
     wk_surf = week_label_font.render(wk_label, True, wk_color)
     screen.blit(wk_surf, (WIDTH // 2 - wk_surf.get_width() // 2, HEIGHT // 2 - 46))
@@ -325,7 +328,7 @@ def midterm_results_screen(screen, course_manager, continue_btn, scroll_y=0):
     if blocked:
         warn_y = cy + 6
         warn_surf = sub_font.render(
-            f"WARNING: {len(blocked)} course(s) below 85% attendance — Final Exam may be blocked!",
+            f"WARNING: {len(blocked)} course(s) below 85% attendance - Final Exam may be blocked!",
             True, (255, 90, 70))
         screen.blit(warn_surf, (WIDTH // 2 - warn_surf.get_width() // 2, warn_y))
 
@@ -347,7 +350,234 @@ def midterm_results_screen(screen, course_manager, continue_btn, scroll_y=0):
     return content_height
 
 
-# Exam Screen
+
+# Exam Period Screens
+
+def exam_schedule_screen(screen, exam_type: str, schedule: list, continue_btn, font) -> None:
+
+    from environment import DAYS_OF_WEEK
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    # Background
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        r = int(10 + 20 * t)
+        g = int(10 + 15 * t)
+        b = int(50 + 60 * t)
+        pygame.draw.line(bg, (r, g, b), (0, y), (WIDTH, y))
+    screen.blit(bg, (0, 0))
+
+    is_final = (exam_type == "final")
+    accent = (255, 200, 100) if is_final else (200, 160, 255)
+    top_bar = (160, 120, 60)  if is_final else (100, 80, 200)
+    pygame.draw.rect(screen, top_bar, (0, 0, WIDTH, 5))
+
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 38)
+    sub_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    row_font = pygame.font.Font("assets/fonts/Papernotes.otf", 20)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
+
+    header_text = "Final Examination Schedule" if is_final else "Midterm Examination Schedule"
+    title_surf = title_font.render(header_text, True, accent)
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 18))
+
+    if is_final:
+        subtitle = "Exam Week 1 / 2 / 3  (Tuesday / Friday)"
+    else:
+        subtitle = "Exam Week 1 / 2  (Monday / Wednesday / Friday)"
+    sub_surf = sub_font.render(subtitle, True, (180, 180, 220))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, 62))
+
+    # Table
+    card_w = 680
+    card_x = (WIDTH - card_w) // 2
+    row_h = 46
+    start_y = 108
+
+    for i, entry in enumerate(schedule):
+        course = entry["course"]
+        week = entry["week"]
+        day_idx = entry["day_idx"]
+        day_str = DAYS_OF_WEEK[day_idx]
+
+        row_y = start_y + i * row_h
+        is_first = (i == 0)
+
+        bg_col = (50, 35, 100) if is_first else ((30, 28, 60) if i % 2 == 0 else (22, 20, 48))
+        border_col = accent if is_first else (60, 55, 120)
+
+        row_rect = pygame.Rect(card_x, row_y, card_w, row_h - 4)
+        pygame.draw.rect(screen, bg_col, row_rect, border_radius=6)
+        pygame.draw.rect(screen, border_col, row_rect, 2, border_radius=6)
+
+        # Course name
+        name_col = accent if is_first else (220, 215, 245)
+        name_surf = row_font.render(course.name, True, name_col)
+        screen.blit(name_surf, (card_x + 16, row_y + (row_h - 4 - name_surf.get_height()) // 2))
+
+        # Day + Week label
+        base_wk = schedule[0]["week"]
+        exam_wk_n = week - base_wk + 1
+        slot_str = f"Exam Week {exam_wk_n} - {day_str}"
+        slot_surf = row_font.render(slot_str, True, (160, 200, 255) if is_first else (160, 155, 200))
+        screen.blit(slot_surf, (card_x + card_w - slot_surf.get_width() - 16,
+                                row_y + (row_h - 4 - slot_surf.get_height()) // 2))
+
+        if is_first:
+            arrow_surf = detail_font.render("< Next", True, (120, 255, 140))
+            screen.blit(arrow_surf, (card_x + card_w // 2 - arrow_surf.get_width() // 2,
+                                     row_y + (row_h - 4 - arrow_surf.get_height()) // 2))
+
+    # Continue button
+    continue_btn.text = "Start Exams"
+    continue_btn.rect.centerx = WIDTH // 2
+    continue_btn.rect.y = HEIGHT - 68
+    continue_btn.draw(screen)
+
+
+def exam_prep_screen(screen, exam_entry: dict, days_until: int, exam_idx: int, total_exams: int,
+                     copy_all: bool, copy_checkbox, begin_btn, font) -> None:
+    
+    from environment import DAYS_OF_WEEK
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        r = int(8 + 22 * t)
+        g = int(8 + 14 * t)
+        b = int(40 + 55 * t)
+        pygame.draw.line(bg, (r, g, b), (0, y), (WIDTH, y))
+    screen.blit(bg, (0, 0))
+    pygame.draw.rect(screen, (80, 60, 160), (0, 0, WIDTH, 5))
+
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 34)
+    sub_font = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    body_font = pygame.font.Font("assets/fonts/Papernotes.otf", 19)
+
+    # Progress
+    prog_str = f"Exam {exam_idx + 1} of {total_exams}"
+    prog_surf = body_font.render(prog_str, True, (140, 140, 200))
+    screen.blit(prog_surf, (WIDTH // 2 - prog_surf.get_width() // 2, 18))
+
+    course = exam_entry["course"]
+    week = exam_entry["week"]
+    day_idx = exam_entry["day_idx"]
+    day_str = DAYS_OF_WEEK[day_idx]
+
+    # Card
+    card_w, card_h = 560, 280
+    card_x = (WIDTH - card_w) // 2
+    card_y = HEIGHT // 2 - card_h // 2 - 30
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((20, 18, 50, 220))
+    screen.blit(card_surf, (card_x, card_y))
+    pygame.draw.rect(screen, (100, 80, 200), (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+    title_surf = title_font.render(f"Next Exam: {course.name}", True, (200, 160, 255))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, card_y + 22))
+
+    # "Exam Week X" label instead of internal week number
+    base_wk   = exam_entry.get("_base_week", exam_entry["week"])  # fallback
+    # We don't have the schedule base easily here; just show day+week in friendly form
+    exam_wk_label = f"Exam Week {exam_idx + 1}"
+    date_surf = sub_font.render(f"{day_str}, {exam_wk_label}", True, (180, 220, 255))
+    screen.blit(date_surf, (WIDTH // 2 - date_surf.get_width() // 2, card_y + 72))
+
+    if days_until == 0:
+        dur_text = "Exam is today!"
+        dur_col = (255, 180, 60)
+    elif days_until == 1:
+        dur_text = "1 day until exam"
+        dur_col = (200, 255, 160)
+    else:
+        dur_text = f"{days_until} days until exam"
+        dur_col = (160, 200, 255)
+    dur_surf = body_font.render(dur_text, True, dur_col)
+    screen.blit(dur_surf, (WIDTH // 2 - dur_surf.get_width() // 2, card_y + 112))
+
+    hint_surf = body_font.render("Study strategy: play each prep day normally.", True, (150, 145, 200))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + 150))
+
+    # Checkbox (only from exam 1 onward)
+    if exam_idx >= 1 and copy_checkbox is not None:
+        copy_checkbox.rect.x = WIDTH // 2 - 130
+        copy_checkbox.rect.y = card_y + 196
+        copy_checkbox.draw(screen)
+
+    # Begin button
+    begin_btn.text = "Begin Prep"
+    begin_btn.rect.centerx = WIDTH // 2
+    begin_btn.rect.y = HEIGHT - 68
+    begin_btn.draw(screen)
+
+
+def exam_taking_screen(screen, exam_entry: dict, exam_type: str,
+                       take_btn, skip_btn, font) -> None:
+    from environment import DAYS_OF_WEEK
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    is_final = (exam_type == "final")
+    accent = (255, 200, 100) if is_final else (200, 160, 255)
+    top_col = (160, 120, 60) if is_final else (100, 80, 200)
+
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / HEIGHT
+        r = int(12 + 25 * t)
+        g = int(8  + 10 * t)
+        b = int(45 + 55 * t)
+        pygame.draw.line(bg, (r, g, b), (0, y), (WIDTH, y))
+    screen.blit(bg, (0, 0))
+    pygame.draw.rect(screen, top_col, (0, 0, WIDTH, 5))
+
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 38)
+    sub_font = pygame.font.Font("assets/fonts/Papernotes.otf", 23)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+
+    exam_label = "Final Exam" if is_final else "Midterm Exam"
+    course = exam_entry["course"]
+
+    card_w, card_h = 600, 300
+    card_x = (WIDTH - card_w) // 2
+    card_y = HEIGHT // 2 - card_h // 2 - 20
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((20, 18, 52, 220))
+    screen.blit(card_surf, (card_x, card_y))
+    pygame.draw.rect(screen, accent, (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+    # Decorative circle
+    pygame.draw.circle(screen, accent, (WIDTH // 2, card_y + 50), 28)
+    pygame.draw.circle(screen, (20, 18, 52), (WIDTH // 2, card_y + 50), 22)
+
+    title_text = f"{course.name} - {exam_label}"
+    title_surf = title_font.render(title_text, True, accent)
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, card_y + 86))
+
+    flavour = ("The exam hall falls silent. Pencils down..."
+               if is_final else
+               "The room is tense. You flip open the paper...")
+    flav_surf = sub_font.render(flavour, True, (200, 195, 240))
+    screen.blit(flav_surf, (WIDTH // 2 - flav_surf.get_width() // 2, card_y + 142))
+
+    hint_surf = detail_font.render("Press Take Exam when you're ready.", True, (130, 125, 180))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, card_y + 188))
+
+    pygame.draw.line(screen, (60, 55, 120),
+                     (card_x + 40, card_y + 224), (card_x + card_w - 40, card_y + 224), 1)
+
+    take_btn.text = "Take Exam"
+    take_btn.rect.centerx = WIDTH // 2 - 70
+    take_btn.rect.y = HEIGHT - 68
+    take_btn.draw(screen)
+
+    skip_btn.text = "Skip"
+    skip_btn.rect.centerx = WIDTH // 2 + 70
+    skip_btn.rect.y = HEIGHT - 68
+    skip_btn.draw(screen)
+
+
 
 def exam_screen(screen, exam_type, continue_btn, font, course_manager=None):
     """Full-screen splash shown for mid or final exams."""

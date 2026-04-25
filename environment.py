@@ -8,6 +8,14 @@ DAY_END:   float = 32.0   # 08:00 next morning (24 + 8)
 DAYS_IN_WEEK = 7
 DAYS_OF_WEEK = [ "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" ]
 
+# Midterm exam window: weeks 8–9, days Mon/Wed/Fri only (day_idx 0, 2, 4)
+MIDTERM_EXAM_WEEKS = [8, 9]
+MIDTERM_EXAM_DAYS = [0, 2, 4]   # Mon, Wed, Fri (0-indexed)
+
+# Final exam window: weeks 16–18, days Tue/Fri only (day_idx 1, 3)
+FINAL_EXAM_WEEKS = [16, 17, 18]
+FINAL_EXAM_DAYS = [1, 3]      # Tue, Fri (0-indexed)
+
 # Index 4 is the lunch slot (no classes)
 # Each class period is 75 minutes 
 SLOT_TIMES: list[tuple[float, float]] = [
@@ -69,31 +77,30 @@ def format_time(hour: float) -> str:
 
 def draw_clock(screen, clock_font, date_font, time_of_day: float,
                day_count: int, bar_space: int, week_count: int = 1,
-               day_in_week: int = 1) -> None:
+               day_in_week: int = 1, exam_week_label: str = None) -> None:
     """Render the digital clock + day + week counter in the top-right area."""
     WIDTH = screen.get_width()
     clock_color = (255, 255, 0)
     time_str  = format_time(time_of_day)
     time_surf  = clock_font.render(time_str, True, clock_color)
-    #day_surf   = date_font.render(f"Day {day_count}", True, clock_color)
-    week_surf  = date_font.render(f"Week {week_count},  {day_name(day_in_week)}", True, clock_color)
+    if exam_week_label:
+        week_label_str = f"{exam_week_label}, {day_name(day_in_week)}"
+        week_color = (255, 255, 0)
+    else:
+        week_label_str = f"Week {week_count}, {day_name(day_in_week)}"
+        week_color = clock_color
+    week_surf  = date_font.render(week_label_str, True, week_color)
 
-    box_w = max(time_surf.get_width(),# day_surf.get_width(),
+    box_w = max(time_surf.get_width(),
                 week_surf.get_width()) + 20
-    box_h = (time_surf.get_height() +# day_surf.get_height()
+    box_h = (time_surf.get_height()
              + week_surf.get_height() + 5)
     box_x = WIDTH - bar_space - box_w
     box_y = 95
 
-    # clock_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-    # clock_bg.fill((0, 0, 0, 180))
-    # screen.blit(clock_bg, (box_x, box_y))
-
     y = 120
     screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, y))
     y += time_surf.get_height() - 10
-    #screen.blit(day_surf,  (box_x + box_w - day_surf.get_width()  - 10, y))
-    #y += day_surf.get_height() - 4
     screen.blit(week_surf, (box_x + box_w - week_surf.get_width() - 10, y))
 
 
