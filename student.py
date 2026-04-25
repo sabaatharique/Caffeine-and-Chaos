@@ -43,7 +43,7 @@ class Student:
 
         # Action rates
         self.study_knowledge_rate = 0.8 * type_mult
-        self.study_sleep_rate =  8    
+        self.study_sleep_rate =  12    
         self.study_stress_rate = 10   
         self.study_health_rate = 5   
 
@@ -55,19 +55,50 @@ class Student:
         self.relax_stress_rate = 8
         self.relax_sleep_rate = 3
         self.relax_motivation_rate = 5
-        self.relax_health_rate = 5       # health gained per hour of relaxing
+        self.relax_health_rate = 5      
 
-        self.eat_health_gain = 10    
+        self.eat_health_gain = 12    
         self.eat_hunger_reduction = 40    
         self.eat_stress_reduction = 5    
 
         self.coffee_sleep_gain = 10    
-        self.coffee_health_loss = 7    
-        self.coffee_stress_gain = 3    
+        self.coffee_health_loss = 10   
+        self.coffee_stress_gain = 5    
 
         self.class_knowledge_rate = 2     
-        self.class_stress_rate = 3     
-        self.class_sleep_loss = 5     
+        self.class_stress_rate = 4     
+        self.class_sleep_loss = 7     
+
+        # Lifetime stats tracking
+        self.stats = {
+            # Time-based (hours)
+            "hours_studied": 0.0,
+            "hours_slept": 0.0,
+            "hours_relaxed": 0.0,
+            "hours_in_class": 0.0,
+            "hours_wifi_outage": 0.0,
+
+            # Counts
+            "coffees_drunk": 0,
+            "meals_eaten": 0,
+            "classes_attended": 0,
+            "classes_skipped": 0,
+
+            # Burnout
+            "burnout_occurrences": 0,
+            "days_burnt_out": 0,
+
+            # Sickness
+            "times_sick": 0,
+            "total_sick_days": 0,
+            "longest_sick_streak": 0,
+            "_current_sick_streak": 0,
+
+            # Peak / floor values
+            "peak_stress": 0,
+            "lowest_health": 100,
+            "peak_motivation": 0,
+        }
 
         # Action enabled
         self.action_status = {
@@ -98,6 +129,13 @@ class Student:
         self.hunger = max(0, min(100, self.hunger))
         self.attendance = max(0, min(100, self.attendance))
 
+        # Update peak / floor stat extremes after every mutation
+        if self.stress > self.stats["peak_stress"]:
+            self.stats["peak_stress"] = self.stress
+        if self.health < self.stats["lowest_health"]:
+            self.stats["lowest_health"] = self.health
+        if self.motivation > self.stats["peak_motivation"]:
+            self.stats["peak_motivation"] = self.motivation
 
         if self.sleep < 10:
             messages.append("Warning: Sleep is critically low!")
@@ -166,9 +204,14 @@ class Student:
 
         if self.burnout_check():
             self.trigger_burnout()
+            self.stats["burnout_occurrences"] += 1
             messages.append("Burnout! Your stats have taken a hit.")
 
-        # ── Sickness logic ────────────────────────────────────────────────────
+        # Track days spent in burnout recovery (burnout_days_remaining was decremented above)
+        if self.burnout_days_remaining > 0:
+            self.stats["days_burnt_out"] += 1
+
+        # Sickness logic 
         # Always record today before checking onset so history is up-to-date
         self._record_daily_history()
 
@@ -177,12 +220,19 @@ class Student:
             if random.random() < self._RECOVERY_PROB:
                 self.is_sick = False
                 self.sick_days_remaining = 0
+                # Reset streak counter on recovery
+                self.stats["_current_sick_streak"] = 0
                 messages.append("[RECOVERED] You're no longer sick. Welcome back!")
             else:
                 self.sick_days_remaining = max(0, self.sick_days_remaining - 1)
                 # Daily passive effect while sick: health drains a little
                 self.health -= 5
                 self.stress += 5
+                # Track sick day
+                self.stats["total_sick_days"] += 1
+                self.stats["_current_sick_streak"] += 1
+                if self.stats["_current_sick_streak"] > self.stats["longest_sick_streak"]:
+                    self.stats["longest_sick_streak"] = self.stats["_current_sick_streak"]
                 messages.append(f"[SICK] Health -5, Stress +5. Still feeling unwell...")
         else:
             # Bernoulli trial for new sickness onset
@@ -194,6 +244,9 @@ class Student:
             if exhausted or random.random() < p:
                 self.is_sick = True
                 self.sick_days_remaining = self._generate_sick_duration()
+                # Track new illness onset
+                self.stats["times_sick"] += 1
+                self.stats["_current_sick_streak"] = 0
                 # Immediate onset penalty
                 self.health -= 10
                 self.stress += 10
@@ -222,6 +275,8 @@ class Student:
 
         course.attended_classes += 1
         self.attendance += 1
+        self.stats["classes_attended"] += 1
+        self.stats["hours_in_class"] += 1.25
         knowledge_gain = (75.0 / max(1, course.total_classes)) * self.type_mult
         course.add_knowledge(knowledge_gain)
         
@@ -261,6 +316,8 @@ class Student:
         if wifi_penalty:
             self.stress += hours * self.wifi_stress_penalty
         self.health -= hours * self.study_health_rate
+
+        self.stats["hours_studied"] += hours
         
         messages.append(f"Studied {course.name} ({hours:.1f}h): +{gain:.1f} knowledge, -{hours * self.study_sleep_rate:.1f} sleep, +{hours * self.study_stress_rate:.1f} stress.")
 
@@ -277,6 +334,7 @@ class Student:
         self.sleep += hours * self.rest_sleep_rate
         self.stress -= hours * self.rest_stress_rate
         self.health += hours * self.rest_health_rate
+        self.stats["hours_slept"] += hours
         
         messages.append(f"Slept ({hours:.1f}h): +{hours*self.rest_sleep_rate:.1f} sleep, -{hours*self.rest_stress_rate:.1f} stress.")
 
@@ -313,6 +371,7 @@ class Student:
         self.hunger -= self.eat_hunger_reduction
         self.stress -= self.eat_stress_reduction
         self.hours_since_last_meal = 0.0  # reset hunger timer
+        self.stats["meals_eaten"] += 1
 
         messages.append(f"Ate a meal: -{self.eat_hunger_reduction:.1f} hunger, +{self.eat_health_gain:.1f} health.")
         messages.extend(self.clamp())
@@ -329,6 +388,7 @@ class Student:
         self.sleep += self.coffee_sleep_gain
         self.health -= self.coffee_health_loss
         self.stress += self.coffee_stress_gain
+        self.stats["coffees_drunk"] += 1
 
         messages.append(f"Drank coffee: +{self.coffee_sleep_gain:.1f} sleep, +{self.coffee_stress_gain:.1f} stress.")
         messages.extend(self.clamp())
@@ -340,6 +400,7 @@ class Student:
         self.sleep  -= hours * self.relax_sleep_rate
         self.motivation += hours * self.relax_motivation_rate
         self.health += hours * self.relax_health_rate   # relaxing restores health
+        self.stats["hours_relaxed"] += hours
 
         messages.append(f"Relaxed ({hours:.1f}h): -{hours*self.relax_stress_rate:.1f} stress, -{hours*self.relax_sleep_rate:.1f} sleep.")
         messages.extend(self.clamp())

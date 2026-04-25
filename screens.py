@@ -431,7 +431,7 @@ def exam_screen(screen, exam_type, continue_btn, font, course_manager=None):
 # Semester End Screen
 
 def semester_end_screen(screen, student, avg_knowledge, quit_btn, font,
-                        course_manager, scroll_y=0):
+                        course_manager, scroll_y=0, next_btn=None):
     """
     Comprehensive final-semester results page.
     Shows per-course breakdown of all quizzes, lab evals, mid & final marks,
@@ -487,16 +487,188 @@ def semester_end_screen(screen, student, avg_knowledge, quit_btn, font,
     bye_surf = detail_font.render("Thanks for playing Caffeine & Chaos!", True, (90, 190, 110))
     screen.blit(bye_surf, (WIDTH // 2 - bye_surf.get_width() // 2, strip_y + 70))
 
-    # Bottom fade
-    fade = pygame.Surface((WIDTH, 70), pygame.SRCALPHA)
-    for i in range(70):
-        alpha = int(210 * (i / 70))
-        pygame.draw.line(fade, (8, 22, 12, alpha), (0, 69 - i), (WIDTH, 69 - i))
-    screen.blit(fade, (0, strip_y - 70))
-
-    # Quit button sits in the GPA strip
+    # Quit button (right side of GPA strip) — same position on both pages
     quit_btn.rect.centerx = WIDTH - 80
     quit_btn.rect.y       = strip_y + 30
+    quit_btn.draw(screen)
+
+    # Next-page button (left side of strip)
+    if next_btn is not None:
+        next_btn.rect.centerx = 80
+        next_btn.rect.y = strip_y + 30
+        next_btn.draw(screen)
+
+    return content_height
+
+
+# Semester Stats Screen (Page 2)
+
+def semester_stats_screen(screen, student, course_manager, prev_btn, quit_btn, scroll_y=0):
+    """
+    Second page of the semester-end screen.
+    Two-column scrollable card grid of lifetime stats.
+    Returns content_height for scroll clamping in the caller.
+    """
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+    _draw_results_bg(screen, (100, 255, 140), (60, 200, 100))
+
+    title_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 42)
+    sub_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    label_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+    value_font  = pygame.font.Font("assets/fonts/Papernotes.otf", 22)
+    sec_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+    detail_font = pygame.font.Font("assets/fonts/Papernotes.otf", 18)
+    gpa_font    = pygame.font.Font("assets/fonts/Papernotes.otf", 48)
+
+    # Header
+    title_surf = title_font.render("Semester Stats", True, (100, 255, 140))
+    screen.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 10))
+    sub_surf = sub_font.render("A look back at your semester", True, (160, 230, 180))
+    screen.blit(sub_surf, (WIDTH // 2 - sub_surf.get_width() // 2, 52))
+
+    # Compute assessment counts from course_manager
+    quizzes_taken = sum(1 for c in course_manager.courses if c.course_type == "Theory"
+                         for q in c.scheduled_quizzes if q.get("taken") and not q.get("missed"))
+    quizzes_missed = sum(1 for c in course_manager.courses if c.course_type == "Theory"
+                         for q in c.scheduled_quizzes if q.get("missed"))
+    labs_taken = sum(1 for c in course_manager.courses if c.course_type == "Lab"
+                         for la in getattr(c, "scheduled_lab_assessments", [])
+                         if la.get("taken") and not la.get("missed"))
+    labs_missed = sum(1 for c in course_manager.courses if c.course_type == "Lab"
+                         for la in getattr(c, "scheduled_lab_assessments", [])
+                         if la.get("missed"))
+
+    s = student.stats
+    attended = s["classes_attended"]
+    skipped = s["classes_skipped"]
+    att_rate = (attended / max(1, attended + skipped)) * 100
+
+    # Card data 
+    sections = [
+        ("Time Spent", [
+            ("Hours Studied", f"{s['hours_studied']:.1f} h"),
+            ("Hours in Class", f"{s['hours_in_class']:.1f} h"),
+            ("Hours Slept", f"{s['hours_slept']:.1f} h"),
+            ("Hours Relaxed", f"{s['hours_relaxed']:.1f} h"),
+            ("Hours Without WiFi", f"{s['hours_wifi_outage']:.1f} h"),
+        ]),
+        ("Health Events", [
+            ("Times Fallen Sick", str(s["times_sick"])),
+            ("Total Sick Days", str(s["total_sick_days"])),
+            ("Longest Sick Streak", f"{s['longest_sick_streak']} day(s)"),
+            ("Burnout Episodes", str(s["burnout_occurrences"])),
+            ("Days Burnt Out", str(s["days_burnt_out"])),
+        ]),
+        ("Daily Life", [
+            ("Coffees Drunk", str(s["coffees_drunk"])),
+            ("Meals Eaten", str(s["meals_eaten"])),
+            ("Classes Attended", str(attended)),
+            ("Classes Skipped", str(skipped)),
+            ("Attendance Rate", f"{att_rate:.0f}%"),
+        ]),
+        ("Assessments", [
+            ("Quizzes Taken", str(quizzes_taken)),
+            ("Quizzes Missed", str(quizzes_missed)),
+            ("Lab Assessments Taken", str(labs_taken)),
+            ("Lab Assessments Missed", str(labs_missed)),
+        ]),
+        ("Peak Stats", [
+            ("Peak Stress", f"{s['peak_stress']:.0f} / 100"),
+            ("Lowest Health", f"{s['lowest_health']:.0f} / 100"),
+            ("Peak Motivation", f"{s['peak_motivation']:.0f} / 100"),
+        ]),
+    ]
+
+    # Layout
+    content_top = 84
+    strip_h = 100
+    clip_h = HEIGHT - content_top - strip_h
+
+    COL_GAP = 20
+    COL_W = (WIDTH - 60 - COL_GAP) // 2
+    left_x = 30
+    right_x = left_x + COL_W + COL_GAP
+
+    CARD_PAD = 10
+    CARD_GAP = 8
+    SEC_H = sec_font.get_height() + 6
+    ROW_H = max(label_font.get_height(), value_font.get_height()) + 6
+
+    def _card_height(rows):
+        return CARD_PAD + SEC_H + len(rows) * ROW_H + CARD_PAD
+
+    def _draw_card(cx, cy, cw, sec_title, rows):
+        """Draw one stat card; cy is the already-scrolled canvas y."""
+        card_h = _card_height(rows)
+        card_surf = pygame.Surface((cw, card_h), pygame.SRCALPHA)
+        card_surf.fill((18, 30, 22, 215))
+        screen.blit(card_surf, (cx, cy))
+        pygame.draw.rect(screen, (60, 200, 100), (cx, cy, cw, card_h), 2, border_radius=8)
+
+        sec_surf = sec_font.render(sec_title, True, (100, 230, 140))
+        screen.blit(sec_surf, (cx + CARD_PAD, cy + CARD_PAD))
+        ry = cy + CARD_PAD + SEC_H
+
+        for lbl, val in rows:
+            lbl_surf = label_font.render(lbl + ":", True, (140, 190, 155))
+            val_surf = value_font.render(val, True, (220, 245, 225))
+            screen.blit(lbl_surf, (cx + CARD_PAD,
+                                   ry + (ROW_H - lbl_surf.get_height()) // 2))
+            screen.blit(val_surf, (cx + cw - CARD_PAD - val_surf.get_width(),
+                                   ry + (ROW_H - val_surf.get_height()) // 2))
+            ry += ROW_H
+
+        return cy + card_h + CARD_GAP
+
+    # Distribute: left col = sections 0,1,2 ; right col = sections 3,4
+    left_secs = sections[:3]
+    right_secs = sections[3:]
+
+    # Measure the taller column to derive total content height
+    left_h = sum(_card_height(s[1]) + CARD_GAP for s in left_secs)
+    right_h = sum(_card_height(s[1]) + CARD_GAP for s in right_secs)
+    content_height = max(left_h, right_h) + 120   
+    # Scrollable clip region
+    screen.set_clip((0, content_top, WIDTH, clip_h))
+
+    start_y = content_top + 8 - int(scroll_y)
+
+    ly = start_y
+    for sec in left_secs:
+        ly = _draw_card(left_x, ly, COL_W, sec[0], sec[1])
+
+    ry_pos = start_y
+    for sec in right_secs:
+        ry_pos = _draw_card(right_x, ry_pos, COL_W, sec[0], sec[1])
+
+    # Footer fade (matches results page)
+    fade_h = 90
+    fade = pygame.Surface((WIDTH, fade_h), pygame.SRCALPHA)
+    for i in range(fade_h):
+        alpha = int(200 * (i / fade_h))
+        pygame.draw.line(fade, (8, 8, 35, alpha), (0, fade_h - 1 - i), (WIDTH, fade_h - 1 - i))
+    screen.blit(fade, (0, HEIGHT - fade_h))
+
+    screen.set_clip(None)
+
+    # Bottom strip — same dimensions as semester_end_screen 
+    strip_y = HEIGHT - strip_h
+    strip_surf = pygame.Surface((WIDTH, strip_h), pygame.SRCALPHA)
+    strip_surf.fill((10, 30, 20, 245))
+    screen.blit(strip_surf, (0, strip_y))
+    pygame.draw.line(screen, (60, 200, 100), (0, strip_y), (WIDTH, strip_y), 2)
+
+    hint_surf = detail_font.render("How did your semester treat you?", True, (90, 190, 110))
+    screen.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, strip_y + 16))
+
+    # "Results" on the left — same coords as next_btn on page 0
+    prev_btn.rect.centerx = 80
+    prev_btn.rect.y = strip_y + 30
+    prev_btn.draw(screen)
+
+    # Quit on the right — identical to page 0
+    quit_btn.rect.centerx = WIDTH - 80
+    quit_btn.rect.y = strip_y + 30
     quit_btn.draw(screen)
 
     return content_height

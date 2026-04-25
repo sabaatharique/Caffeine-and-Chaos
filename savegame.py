@@ -4,6 +4,20 @@ import os
 SAVE_FILE = "save_data.json"
 
 
+def _default_stats() -> dict:
+    """Return a zeroed lifetime-stats dict (used when loading old saves)."""
+    return {
+        "hours_studied": 0.0, "hours_slept": 0.0, "hours_relaxed": 0.0,
+        "hours_in_class": 0.0, "hours_wifi_outage": 0.0,
+        "coffees_drunk": 0, "meals_eaten": 0,
+        "classes_attended": 0, "classes_skipped": 0,
+        "burnout_occurrences": 0, "days_burnt_out": 0,
+        "times_sick": 0, "total_sick_days": 0,
+        "longest_sick_streak": 0, "_current_sick_streak": 0,
+        "peak_stress": 0, "lowest_health": 100, "peak_motivation": 0,
+    }
+
+
 def _student_to_dict(student) -> dict:
     return {
         "type_mult": student.type_mult,
@@ -20,6 +34,7 @@ def _student_to_dict(student) -> dict:
         "sick_days_remaining": student.sick_days_remaining,
         "stress_history": student._stress_history,
         "health_history": student._health_history,
+        "stats": student.stats,
     }
 
 
@@ -39,6 +54,9 @@ def _student_from_dict(data: dict, student):
     student.sick_days_remaining = data.get("sick_days_remaining", 0)
     student._stress_history     = data.get("stress_history", [])
     student._health_history     = data.get("health_history", [])
+    # Merge saved stats with defaults so old saves load without KeyError
+    saved_stats = data.get("stats", {})
+    student.stats = {**_default_stats(), **saved_stats}
     student.update_action_status()
 
 
