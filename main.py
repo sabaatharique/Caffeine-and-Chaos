@@ -743,12 +743,8 @@ sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", butt
 relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
 drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
 eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
-stats_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 440, btn_w, btn_h, "Course Panel", button_font)
-stats_dashboard_btn = Button(btn_space, HEIGHT - 440, btn_w, btn_h, "My Stats", button_font)
-
 dashboard_btn = None   # Removed as it's now persistent
-game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn,
-                stats_btn, stats_dashboard_btn]
+game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
 _btn_y = HEIGHT // 2 + 50
@@ -990,10 +986,7 @@ while running:
     # Button enable state
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
-            if btn not in (stats_btn, stats_dashboard_btn):
-                btn.enabled = False
-        stats_btn.enabled = True
-        stats_dashboard_btn.enabled = True
+            btn.enabled = False
     else:
         study_btn.enabled = student.action_status['study'] and remaining_hours > 0
         sleep_btn.enabled = student.action_status['sleep'] and remaining_hours > 0
@@ -1334,18 +1327,6 @@ while running:
                     print(f"Time of day: {format_time(time_of_day)}")
                     _check_day_end(new_messages)
 
-                # Toggle Course Panel (right) - close stats panel if opening
-                if stats_btn.clicked(event):
-                    academic_dashboard.expanded = not academic_dashboard.expanded
-                    if academic_dashboard.expanded:
-                        stats_dashboard.expanded = False
-
-                # Toggle My Stats panel (left) - close course panel if opening
-                if stats_dashboard_btn.clicked(event):
-                    stats_dashboard.expanded = not stats_dashboard.expanded
-                    if stats_dashboard.expanded:
-                        academic_dashboard.expanded = False
-
             if new_messages:
                 messages.extend(new_messages)
                 messages = messages[-5:]
@@ -1586,16 +1567,6 @@ while running:
                     messages = []
 
             else:
-                if stats_btn.clicked(event):
-                    academic_dashboard.expanded = not academic_dashboard.expanded
-                    if academic_dashboard.expanded:
-                        stats_dashboard.expanded = False
-
-                if stats_dashboard_btn.clicked(event):
-                    stats_dashboard.expanded = not stats_dashboard.expanded
-                    if stats_dashboard.expanded:
-                        academic_dashboard.expanded = False
-
                 if continue_btn.clicked(event):
                     replay_runner = None
                     week_replay_runner = None
@@ -2191,8 +2162,6 @@ while running:
             sick_active=sick_active,
             exam_week_label=_de_week_label,
         )
-        stats_btn.draw(screen)
-        stats_dashboard_btn.draw(screen)
         academic_dashboard.draw(screen, course_manager, week_count)
         stats_dashboard.draw(screen, student, day_count)
         quiz_week_prompt_box.draw(screen)

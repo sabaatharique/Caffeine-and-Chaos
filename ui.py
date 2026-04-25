@@ -2043,7 +2043,7 @@ class AcademicDashboard:
 
     # Dimensions 
     _PANEL_W       = 280   # expanded width
-    _TAB_W         = 0     # collapsed tab width (visible strip on right edge)
+    _TAB_W         = 28    # collapsed tab width (visible strip on right edge)
     _PANEL_H_PAD   = 0     # top padding from screen top (full height)
     _ANIM_SPEED    = 8.0   # units/second — higher = faster slide
 
@@ -2077,6 +2077,7 @@ class AcademicDashboard:
         self._fonts_loaded = False
         self.scroll_y    = 0.0
         self.max_scroll  = 0.0
+        self._collapse_arrow_rect = None  # set during draw; used by handle_event
 
         # Font handles (loaded lazily via _ensure_fonts)
         self._f_heading  = None   # section headers
@@ -2097,23 +2098,36 @@ class AcademicDashboard:
             self._anim_t  = max(0.0, min(1.0, self._anim_t))
 
     def handle_event(self, event) -> bool:
-        """Collapse if clicking anywhere outside the expanded panel.
-           Consume all clicks to prevent interacting with UI beneath."""
-        if not self.expanded:
+        """Toggle on tab click when collapsed; collapse on outside click or arrow click when expanded."""
+        if event.type == pygame.MOUSEWHEEL:
+            if self.expanded:
+                mx, my = pygame.mouse.get_pos()
+                if mx >= self.screen_w - self._PANEL_W:
+                    self.scroll_y -= event.y * 30
+                    self.scroll_y = max(0.0, min(self.scroll_y, self.max_scroll))
+                    return True
             return False
 
-        if event.type == pygame.MOUSEWHEEL:
-            mx, my = pygame.mouse.get_pos()
-            if mx >= self.screen_w - self._PANEL_W:
-                self.scroll_y -= event.y * 30
-                self.scroll_y = max(0.0, min(self.scroll_y, self.max_scroll))
-                return True
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mx, my = event.pos
-            if mx < self.screen_w - self._PANEL_W:
-                self.expanded = False
-                self.scroll_y = 0.0
-            return True
+            if not self.expanded:
+                # Click on the collapsed tab strip -> expand
+                if mx >= self.screen_w - self._TAB_W:
+                    self.expanded = True
+                    return True
+                return False
+            else:
+                # Click on the collapse arrow -> collapse
+                if (self._collapse_arrow_rect is not None
+                        and self._collapse_arrow_rect.collidepoint(mx, my)):
+                    self.expanded = False
+                    self.scroll_y = 0.0
+                    return True
+                # Click outside expanded panel -> collapse
+                if mx < self.screen_w - self._PANEL_W:
+                    self.expanded = False
+                    self.scroll_y = 0.0
+                return True
         return False
 
     def draw(self, screen, course_manager, week_count: int):
@@ -2122,8 +2136,6 @@ class AcademicDashboard:
 
         sw, sh = self.screen_w, self.screen_h
         panel_w = int(self._TAB_W + t * (self._PANEL_W - self._TAB_W))
-        if panel_w <= 0:
-            return
 
         panel_x = sw - panel_w
 
@@ -2136,6 +2148,17 @@ class AcademicDashboard:
         glow_alpha = int(180 + 75 * t)
         pygame.draw.line(screen, (*self._C_GLOW, glow_alpha),
                          (panel_x, 0), (panel_x, sh), 2)
+
+        # ── Collapsed tab label: "Course Info" rotated vertically ──────────
+        tab_label_alpha = int(max(0, (1.0 - t) / 0.5) * 220)
+        if tab_label_alpha > 0 and self._f_tab is not None:
+            tab_surf = self._f_tab.render("Course Info", True, (180, 155, 255))
+            tab_rot  = pygame.transform.rotate(tab_surf, 90)
+            tab_rect = tab_rot.get_rect(center=(sw - self._TAB_W // 2, sh // 2))
+            tab_surf_alpha = pygame.Surface(tab_rot.get_size(), pygame.SRCALPHA)
+            tab_surf_alpha.blit(tab_rot, (0, 0))
+            tab_surf_alpha.set_alpha(tab_label_alpha)
+            screen.blit(tab_surf_alpha, tab_rect)
 
         # ── Content (fades in as panel expands) 
         content_alpha = int(max(0, (t - 0.4) / 0.6) * 255)
@@ -2300,6 +2323,26 @@ class AcademicDashboard:
         total_h = y + int(self.scroll_y)
         self.max_scroll = max(0.0, total_h - sh + 20)
 
+        # ── Collapse arrow (inner left edge of expanded panel) ───────────────
+        arrow_alpha = int(max(0, (t - 0.5) / 0.5) * 210)
+        if arrow_alpha > 0:
+            ar = 10  # radius
+            ax = panel_x + ar + 2
+            ay = sh // 2
+            self._collapse_arrow_rect = pygame.Rect(ax - ar, ay - ar, ar * 2, ar * 2)
+            # Circle background
+            arrow_bg = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
+            pygame.draw.circle(arrow_bg, (60, 50, 110, arrow_alpha), (ar, ar), ar)
+            pygame.draw.circle(arrow_bg, (*self._C_GLOW, arrow_alpha), (ar, ar), ar, 1)
+            screen.blit(arrow_bg, (ax - ar, ay - ar))
+            # "▶" chevron (points right → collapse into right wall)
+            if self._f_tab is not None:
+                ch_surf = self._f_tab.render(">", True, (200, 180, 255))
+                ch_surf.set_alpha(arrow_alpha)
+                screen.blit(ch_surf, ch_surf.get_rect(center=(ax, ay)))
+        else:
+            self._collapse_arrow_rect = None
+
     # private helpers 
 
     def _tab_rect(self) -> pygame.Rect:
@@ -2312,7 +2355,7 @@ class AcademicDashboard:
         self._f_heading = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
         self._f_body    = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
         self._f_detail  = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
-        self._f_tab     = pygame.font.Font("assets/fonts/Papernotes.otf", 16)
+        self._f_tab     = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
         self._fonts_loaded = True
 
     def _draw_section(self, screen, title: str,
@@ -2410,6 +2453,7 @@ class StatsDashboard:
     """Left-side sliding panel showing lifetime student statistics."""
 
     _PANEL_W     = 280
+    _TAB_W       = 28    # visible tab strip when collapsed
     _ANIM_SPEED  = 8.0
 
     _C_BG        = (14, 14, 28, 240)
@@ -2437,9 +2481,11 @@ class StatsDashboard:
         self._fonts_loaded = False
         self.scroll_y      = 0.0
         self.max_scroll    = 0.0
+        self._collapse_arrow_rect = None  # set during draw; used by handle_event
         self._f_heading    = None
         self._f_body       = None
         self._f_detail     = None
+        self._f_tab        = None
 
     def update(self, dt: float):
         """Animate the slide. Call every frame with dt in seconds."""
@@ -2452,23 +2498,36 @@ class StatsDashboard:
             self._anim_t  = max(0.0, min(1.0, self._anim_t))
 
     def handle_event(self, event) -> bool:
-        """Consume events when expanded. Collapse on click outside panel."""
-        if not self.expanded:
-            return False
-
+        """Toggle on tab click when collapsed; collapse on outside click or arrow click when expanded."""
         if event.type == pygame.MOUSEWHEEL:
-            mx, my = pygame.mouse.get_pos()
-            if mx <= self._PANEL_W:
-                self.scroll_y -= event.y * 30
-                self.scroll_y = max(0.0, min(self.scroll_y, self.max_scroll))
-                return True
+            if self.expanded:
+                mx, my = pygame.mouse.get_pos()
+                if mx <= self._PANEL_W:
+                    self.scroll_y -= event.y * 30
+                    self.scroll_y = max(0.0, min(self.scroll_y, self.max_scroll))
+                    return True
+            return False
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mx, my = event.pos
-            if mx > self._PANEL_W:
-                self.expanded = False
-                self.scroll_y = 0.0
-            return True
+            if not self.expanded:
+                # Click on the collapsed tab strip -> expand
+                if mx <= self._TAB_W:
+                    self.expanded = True
+                    return True
+                return False
+            else:
+                # Click on the collapse arrow -> collapse
+                if (self._collapse_arrow_rect is not None
+                        and self._collapse_arrow_rect.collidepoint(mx, my)):
+                    self.expanded = False
+                    self.scroll_y = 0.0
+                    return True
+                # Click outside expanded panel -> collapse
+                if mx > self._PANEL_W:
+                    self.expanded = False
+                    self.scroll_y = 0.0
+                return True
 
         return False
 
@@ -2477,9 +2536,7 @@ class StatsDashboard:
         t = self._anim_t
 
         sw, sh  = self.screen_w, self.screen_h
-        panel_w = int(t * self._PANEL_W)
-        if panel_w <= 0:
-            return
+        panel_w = int(self._TAB_W + t * (self._PANEL_W - self._TAB_W))
 
         bg_surf = pygame.Surface((panel_w, sh), pygame.SRCALPHA)
         bg_surf.fill(self._C_BG)
@@ -2490,12 +2547,23 @@ class StatsDashboard:
                          (*self._C_GLOW, glow_alpha),
                          (panel_w, 0), (panel_w, sh), 2)
 
+        # ── Collapsed tab label: "My Stats" rotated vertically ─────────────
+        tab_label_alpha = int(max(0, (1.0 - t) / 0.5) * 220)
+        if tab_label_alpha > 0 and self._f_tab is not None:
+            tab_surf = self._f_tab.render("My Stats", True, (180, 155, 255))
+            tab_rot  = pygame.transform.rotate(tab_surf, -90)
+            tab_rect = tab_rot.get_rect(center=(self._TAB_W // 2, sh // 2))
+            tab_surf_alpha = pygame.Surface(tab_rot.get_size(), pygame.SRCALPHA)
+            tab_surf_alpha.blit(tab_rot, (0, 0))
+            tab_surf_alpha.set_alpha(tab_label_alpha)
+            screen.blit(tab_surf_alpha, tab_rect)
+
         content_alpha = int(max(0, (t - 0.4) / 0.6) * 255)
         if content_alpha <= 0:
             return
 
-        content_x = 10
-        content_w = panel_w - 20
+        content_x = self._TAB_W + 10
+        content_w = panel_w - self._TAB_W - 20
         y         = 18 - int(self.scroll_y)
 
         old_clip = screen.get_clip()
@@ -2518,6 +2586,26 @@ class StatsDashboard:
 
         screen.set_clip(old_clip)
         self.max_scroll = max(0.0, y + int(self.scroll_y) - sh + 20)
+
+        # ── Collapse arrow (inner right edge of expanded panel) ──────────────
+        arrow_alpha = int(max(0, (t - 0.5) / 0.5) * 210)
+        if arrow_alpha > 0:
+            ar = 10  # radius
+            ax = panel_w - ar - 2
+            ay = sh // 2
+            self._collapse_arrow_rect = pygame.Rect(ax - ar, ay - ar, ar * 2, ar * 2)
+            # Circle background
+            arrow_bg = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
+            pygame.draw.circle(arrow_bg, (60, 50, 110, arrow_alpha), (ar, ar), ar)
+            pygame.draw.circle(arrow_bg, (*self._C_GLOW, arrow_alpha), (ar, ar), ar, 1)
+            screen.blit(arrow_bg, (ax - ar, ay - ar))
+            # "◀" chevron (points left → collapse into left wall)
+            if self._f_tab is not None:
+                ch_surf = self._f_tab.render("<", True, (200, 180, 255))
+                ch_surf.set_alpha(arrow_alpha)
+                screen.blit(ch_surf, ch_surf.get_rect(center=(ax, ay)))
+        else:
+            self._collapse_arrow_rect = None
 
     # ── Section renderers ────────────────────────────────────────────────
 
@@ -2712,4 +2800,5 @@ class StatsDashboard:
         self._f_heading    = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
         self._f_body       = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
         self._f_detail     = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
+        self._f_tab        = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
         self._fonts_loaded = True
