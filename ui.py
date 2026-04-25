@@ -36,7 +36,38 @@ class StatusBar:
         screen.blit(text, (self.rect.x, self.rect.y - 28))
 
 
+class Checkbox:
+    _CB_ON  = (80, 200, 120)
+    _CB_OFF = (80, 80, 110)
+
+    def __init__(self, x, y, label: str, font, checked=False):
+        self.rect = pygame.Rect(x, y, 22, 22)
+        self.label = label
+        self.font = font
+        self.checked = checked
+
+    def handle_event(self, event) -> bool:
+        """Toggle on click; return new checked state."""
+        if event.type == pygame.MOUSEBUTTONDOWN and self.rect.collidepoint(event.pos):
+            self.checked = not self.checked
+        return self.checked
+
+    def draw(self, screen):
+        cb_col = self._CB_ON if self.checked else self._CB_OFF
+        pygame.draw.rect(screen, cb_col, self.rect, border_radius=4)
+        pygame.draw.rect(screen, (200, 210, 255), self.rect, 2, border_radius=4)
+        if self.checked:
+            cx, cy = self.rect.centerx, self.rect.centery
+            pygame.draw.line(screen, (255, 255, 255),
+                             (cx - 6, cy), (cx - 1, cy + 5), 3)
+            pygame.draw.line(screen, (255, 255, 255),
+                             (cx - 1, cy + 5), (cx + 7, cy - 5), 3)
+        surf = self.font.render(self.label, True, (220, 220, 220))
+        screen.blit(surf, (self.rect.right + 10, self.rect.y + (self.rect.height - surf.get_height()) // 2))
+
+
 class Button:
+
     def __init__(self, x, y, w, h, text, font, enabled=True):
         self.rect = pygame.Rect(x, y, w, h)
         self.text = text
@@ -1906,10 +1937,10 @@ class QuizWeekPromptBox:
         if not self.active:
             return None
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_RETURN:   # Enter → play manually
+            if event.key == pygame.K_SPACE:   # Space → play manually
                 self.active = False
                 return "manual"
-            if event.key == pygame.K_r:        # R → keep repeating
+            if event.key == pygame.K_r or event.key == pygame.K_RETURN:        # R or Enter → keep repeating
                 self.active = False
                 return "repeat"
         if event.type == pygame.MOUSEBUTTONDOWN:

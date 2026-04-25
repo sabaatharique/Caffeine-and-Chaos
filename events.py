@@ -157,3 +157,30 @@ def generate_lab_assessment_schedule(weekly_slots):
         assessments.append(final)
 
     return assessments
+
+
+def generate_exam_schedule(theory_courses: list, exam_weeks: list, exam_days: list) -> list[dict]:
+    """
+    Assign each theory course one unique (week, day_idx) exam slot using
+    uniform random distribution with no two courses on the same day.
+    Returns a list of dicts sorted chronologically:
+        [{ "course": <Course>, "week": int, "day_idx": int }, ...]
+    """
+    slots = [(w, d) for w in exam_weeks for d in exam_days]
+    random.shuffle(slots)
+
+    schedule = []
+    used = set()
+    for course in theory_courses:
+        for slot in slots:
+            if slot not in used:
+                used.add(slot)
+                schedule.append({
+                    "course": course,
+                    "week": slot[0],
+                    "day_idx": slot[1],
+                })
+                break
+
+    schedule.sort(key=lambda x: (x["week"], x["day_idx"]))
+    return schedule

@@ -446,6 +446,21 @@ class Course:
 class CourseManager:
     def __init__(self):
         self.courses = []
+        self.midterm_schedule: list[dict] = []   # [{"course", "week", "day_idx"}, ...]
+        self.final_schedule: list[dict] = []
+
+    def generate_midterm_schedule(self):
+        from events import generate_exam_schedule
+        from environment import MIDTERM_EXAM_WEEKS, MIDTERM_EXAM_DAYS
+        theory = [c for c in self.courses if c.course_type == "Theory"]
+        self.midterm_schedule = generate_exam_schedule(theory, MIDTERM_EXAM_WEEKS, MIDTERM_EXAM_DAYS)
+
+    def generate_final_schedule(self):
+        from events import generate_exam_schedule
+        from environment import FINAL_EXAM_WEEKS, FINAL_EXAM_DAYS
+        theory = [c for c in self.courses if c.course_type == "Theory"]
+        self.final_schedule = generate_exam_schedule(theory, FINAL_EXAM_WEEKS, FINAL_EXAM_DAYS)
+
 
     def add_course(self, name, credits, course_type="Theory", max_lab_evaluations=0,
                    total_classes=0, schedule="weekly"):

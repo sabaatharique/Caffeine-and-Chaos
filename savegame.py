@@ -152,11 +152,17 @@ def save_game(student, course_manager,
               day_actions: list, week_actions: list,
               classes_resolved: set = None,
               quizzes_resolved: set = None,
-              attend_all_today: bool = False) -> bool:
+              attend_all_today: bool = False,
+              exam_period_type: str = "",
+              exam_idx: int = 0,
+              exam_copy_to_all: bool = False,
+              exam_prep_actions: list = None) -> bool:
     """
     Write all game state to SAVE_FILE.
     Returns True on success, False on error.
     """
+    # Serialise midterm/final schedules
+    name_to_str = lambda s: [{"course_name": e["course"].name, "week": e["week"], "day_idx": e["day_idx"]} for e in s]
     payload = {
         "student": _student_to_dict(student),
         "courses": [_course_to_dict(c) for c in course_manager.courses],
@@ -171,6 +177,13 @@ def save_game(student, course_manager,
         "classes_resolved_today": list(classes_resolved) if classes_resolved else [],
         "quizzes_resolved_today": list(quizzes_resolved) if quizzes_resolved else [],
         "attend_all_today": attend_all_today,
+        # Exam period state
+        "midterm_schedule": name_to_str(course_manager.midterm_schedule),
+        "final_schedule":   name_to_str(course_manager.final_schedule),
+        "exam_period_type": exam_period_type,
+        "exam_idx":         exam_idx,
+        "exam_copy_to_all": exam_copy_to_all,
+        "exam_prep_actions": _actions_to_serialisable(exam_prep_actions or []),
     }
     try:
         with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -206,6 +219,18 @@ def load_game(student, course_manager) -> dict | None:
             for d in data.get("week_actions", [])
         ]
 
+        # Restore exam schedules
+        name_map = {c.name: c for c in course_manager.courses}
+        course_manager.midterm_schedule = [
+            {"course": name_map[s["course_name"]], "week": s["week"], "day_idx": s["day_idx"]}
+            for s in data.get("midterm_schedule", []) if s["course_name"] in name_map
+        ]
+        course_manager.final_schedule = [
+            {"course": name_map[s["course_name"]], "week": s["week"], "day_idx": s["day_idx"]}
+            for s in data.get("final_schedule", []) if s["course_name"] in name_map
+        ]
+        exam_prep_actions = _actions_from_serialisable(data.get("exam_prep_actions", []), course_manager)
+
         return {
             "time_of_day": data.get("time_of_day", 8.0),
             "day_count": data.get("day_count", 1),
@@ -218,6 +243,10 @@ def load_game(student, course_manager) -> dict | None:
             "classes_resolved_today": set(data.get("classes_resolved_today", [])),
             "quizzes_resolved_today": {tuple(x) for x in data.get("quizzes_resolved_today", []) if isinstance(x, (list, tuple))},
             "attend_all_today": data.get("attend_all_today", False),
+            "exam_period_type": data.get("exam_period_type", ""),
+            "exam_idx": data.get("exam_idx", 0),
+            "exam_copy_to_all": data.get("exam_copy_to_all", False),
+            "exam_prep_actions": exam_prep_actions,
         }
     except Exception as e:
         print(f"[SaveGame] Failed to load: {e}")
