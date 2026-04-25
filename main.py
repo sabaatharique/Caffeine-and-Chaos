@@ -7,7 +7,7 @@ from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
 from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
-                QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
+                QuizResultBox, AcademicDashboard, StatsDashboard, QuizWeekPromptBox,
                 QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox,
                 Checkbox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
@@ -708,6 +708,11 @@ academic_dashboard = AcademicDashboard(
     message_font,
     message_font,
 )
+stats_dashboard = StatsDashboard(
+    WIDTH, HEIGHT,
+    message_font,
+    message_font,
+)
 
 pending_action: str | None = None
 
@@ -739,9 +744,11 @@ relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", bu
 drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
 eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
 stats_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 440, btn_w, btn_h, "Course Panel", button_font)
+stats_dashboard_btn = Button(btn_space, HEIGHT - 440, btn_w, btn_h, "My Stats", button_font)
 
 dashboard_btn = None   # Removed as it's now persistent
-game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn, stats_btn]
+game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn,
+                stats_btn, stats_dashboard_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
 _btn_y = HEIGHT // 2 + 50
@@ -972,6 +979,7 @@ running = True
 while running:
     dt = clock.tick(60) / 1000.0
     academic_dashboard.update(dt)
+    stats_dashboard.update(dt)
     
     remaining_hours = DAY_END - time_of_day
 
@@ -982,9 +990,10 @@ while running:
     # Button enable state
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
-            if btn != stats_btn:
+            if btn not in (stats_btn, stats_dashboard_btn):
                 btn.enabled = False
         stats_btn.enabled = True
+        stats_dashboard_btn.enabled = True
     else:
         study_btn.enabled = student.action_status['study'] and remaining_hours > 0
         sleep_btn.enabled = student.action_status['sleep'] and remaining_hours > 0
@@ -1032,7 +1041,11 @@ while running:
         if lab_assessment_result_box.handle_event(event):
             continue
 
-        # Academic dashboard expansion/collapse
+        # Stats dashboard expansion/collapse (left panel - checked first)
+        if stats_dashboard.handle_event(event):
+            continue
+
+        # Academic dashboard expansion/collapse (right panel)
         if academic_dashboard.handle_event(event):
             continue
 
@@ -1321,8 +1334,17 @@ while running:
                     print(f"Time of day: {format_time(time_of_day)}")
                     _check_day_end(new_messages)
 
+                # Toggle Course Panel (right) - close stats panel if opening
                 if stats_btn.clicked(event):
                     academic_dashboard.expanded = not academic_dashboard.expanded
+                    if academic_dashboard.expanded:
+                        stats_dashboard.expanded = False
+
+                # Toggle My Stats panel (left) - close course panel if opening
+                if stats_dashboard_btn.clicked(event):
+                    stats_dashboard.expanded = not stats_dashboard.expanded
+                    if stats_dashboard.expanded:
+                        academic_dashboard.expanded = False
 
             if new_messages:
                 messages.extend(new_messages)
@@ -1566,6 +1588,13 @@ while running:
             else:
                 if stats_btn.clicked(event):
                     academic_dashboard.expanded = not academic_dashboard.expanded
+                    if academic_dashboard.expanded:
+                        stats_dashboard.expanded = False
+
+                if stats_dashboard_btn.clicked(event):
+                    stats_dashboard.expanded = not stats_dashboard.expanded
+                    if stats_dashboard.expanded:
+                        academic_dashboard.expanded = False
 
                 if continue_btn.clicked(event):
                     replay_runner = None
@@ -2060,6 +2089,7 @@ while running:
             draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
                        week_count=week_count, day_in_week=day_in_week)
             academic_dashboard.draw(screen, course_manager, week_count)
+            stats_dashboard.draw(screen, student, day_count)
         elif _last_game_screen == DAY_END_SCREEN:
             avg_k = course_manager.get_average_knowledge()
             day_end_screen(
@@ -2076,6 +2106,7 @@ while running:
                 sick_active=sick_active,
             )
             academic_dashboard.draw(screen, course_manager, week_count)
+            stats_dashboard.draw(screen, student, day_count)
         save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
 
     elif current_screen_state == MAIN_MENU:
@@ -2123,8 +2154,10 @@ while running:
         alert_box.draw(screen)
         class_interrupt_box.draw(screen)
 
-        # Draw academic dashboard (behind quiz popup)
+        # Draw academic dashboard (right, behind quiz popup)
         academic_dashboard.draw(screen, course_manager, week_count)
+        # Draw stats dashboard (left, same z-level)
+        stats_dashboard.draw(screen, student, day_count)
 
         # Draw quiz result popup (topmost)
         quiz_result_box.draw(screen)
@@ -2159,7 +2192,9 @@ while running:
             exam_week_label=_de_week_label,
         )
         stats_btn.draw(screen)
+        stats_dashboard_btn.draw(screen)
         academic_dashboard.draw(screen, course_manager, week_count)
+        stats_dashboard.draw(screen, student, day_count)
         quiz_week_prompt_box.draw(screen)
         quiz_interrupt_box.draw(screen)   # replay quiz Take/Skip prompt
         lab_assessment_interrupt_box.draw(screen)  # replay lab Take/Skip prompt

@@ -2404,3 +2404,312 @@ class AcademicDashboard:
         # Sort by week (descending)
         res.sort(key=lambda x: x["week"], reverse=True)
         return res
+
+
+class StatsDashboard:
+    """Left-side sliding panel showing lifetime student statistics."""
+
+    _PANEL_W     = 280
+    _ANIM_SPEED  = 8.0
+
+    _C_BG        = (14, 14, 28, 240)
+    _C_EDGE      = (80, 60, 160)
+    _C_GLOW      = (120, 90, 220)
+    _C_TEXT      = (220, 215, 240)
+    _C_DIM       = (120, 115, 150)
+    _C_DIVIDER   = (40, 36, 72)
+
+    _C_TIME      = (80, 200, 240)
+    _C_WELLNESS  = (240, 130, 60)
+    _C_LIFESTYLE = (240, 210, 60)
+    _C_RECORDS   = (190, 100, 240)
+    _C_GOOD      = (50, 220, 120)
+    _C_WARN      = (240, 190, 50)
+    _C_BAD       = (220, 60, 60)
+
+    def __init__(self, screen_w: int, screen_h: int, font, small_font):
+        self.screen_w      = screen_w
+        self.screen_h      = screen_h
+        self.font          = font
+        self.small_font    = small_font
+        self.expanded      = False
+        self._anim_t       = 0.0
+        self._fonts_loaded = False
+        self.scroll_y      = 0.0
+        self.max_scroll    = 0.0
+        self._f_heading    = None
+        self._f_body       = None
+        self._f_detail     = None
+
+    def update(self, dt: float):
+        """Animate the slide. Call every frame with dt in seconds."""
+        target = 1.0 if self.expanded else 0.0
+        diff   = target - self._anim_t
+        if abs(diff) < 0.002:
+            self._anim_t = target
+        else:
+            self._anim_t += diff * self._ANIM_SPEED * dt
+            self._anim_t  = max(0.0, min(1.0, self._anim_t))
+
+    def handle_event(self, event) -> bool:
+        """Consume events when expanded. Collapse on click outside panel."""
+        if not self.expanded:
+            return False
+
+        if event.type == pygame.MOUSEWHEEL:
+            mx, my = pygame.mouse.get_pos()
+            if mx <= self._PANEL_W:
+                self.scroll_y -= event.y * 30
+                self.scroll_y = max(0.0, min(self.scroll_y, self.max_scroll))
+                return True
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            mx, my = event.pos
+            if mx > self._PANEL_W:
+                self.expanded = False
+                self.scroll_y = 0.0
+            return True
+
+        return False
+
+    def draw(self, screen, student, day_count: int):
+        self._ensure_fonts()
+        t = self._anim_t
+
+        sw, sh  = self.screen_w, self.screen_h
+        panel_w = int(t * self._PANEL_W)
+        if panel_w <= 0:
+            return
+
+        bg_surf = pygame.Surface((panel_w, sh), pygame.SRCALPHA)
+        bg_surf.fill(self._C_BG)
+        screen.blit(bg_surf, (0, 0))
+
+        glow_alpha = int(180 + 75 * t)
+        pygame.draw.line(screen,
+                         (*self._C_GLOW, glow_alpha),
+                         (panel_w, 0), (panel_w, sh), 2)
+
+        content_alpha = int(max(0, (t - 0.4) / 0.6) * 255)
+        if content_alpha <= 0:
+            return
+
+        content_x = 10
+        content_w = panel_w - 20
+        y         = 18 - int(self.scroll_y)
+
+        old_clip = screen.get_clip()
+        screen.set_clip((0, 0, panel_w, sh))
+
+        y = self._draw_time_section(screen, student, day_count,
+                                    content_x, content_w, y, content_alpha)
+        y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
+        y = self._draw_academic_section(screen, student, day_count,
+                                         content_x, content_w, y, content_alpha)
+        y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
+        y = self._draw_wellness_section(screen, student,
+                                         content_x, content_w, y, content_alpha)
+        y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
+        y = self._draw_lifestyle_section(screen, student, day_count,
+                                          content_x, content_w, y, content_alpha)
+        y = self._draw_divider(screen, content_x, content_w, y, content_alpha)
+        y = self._draw_records_section(screen, student,
+                                        content_x, content_w, y, content_alpha)
+
+        screen.set_clip(old_clip)
+        self.max_scroll = max(0.0, y + int(self.scroll_y) - sh + 20)
+
+    # ── Section renderers ────────────────────────────────────────────────
+
+    def _draw_time_section(self, screen, student, day_count,
+                           x, w, y, alpha) -> int:
+        y    = self._draw_section(screen, "TIME BREAKDOWN", x, w, y, alpha)
+        s    = student.stats
+        days = max(1, day_count)
+        rows = [
+            ("Study",     s["hours_studied"],    self._C_TIME,      True),
+            ("Sleep",     s["hours_slept"],       self._C_GOOD,      True),
+            ("Relax",     s["hours_relaxed"],     self._C_RECORDS,   True),
+            ("Class",     s["hours_in_class"],    self._C_WARN,      True),
+            ("WiFi Lost", s["hours_wifi_outage"], self._C_BAD,       False),
+        ]
+        max_h = max((r[1] for r in rows), default=1.0) or 1.0
+        for label, hours, color, show_avg in rows:
+            lbl_surf = self._f_body.render(label, True,
+                                            self._alpha_color(self._C_TEXT, alpha))
+            screen.blit(lbl_surf, (x, y))
+            val_surf = self._f_detail.render(f"{hours:.1f} h", True,
+                                              self._alpha_color(color, alpha))
+            screen.blit(val_surf, (x + w - val_surf.get_width(), y))
+            y += lbl_surf.get_height() + 2
+            y = self._draw_mini_bar(screen, x, w, y, hours / max_h, color, alpha)
+            if show_avg:
+                avg      = hours / days
+                avg_surf = self._f_detail.render(f"avg {avg:.1f} h/day", True,
+                                                  self._alpha_color(self._C_DIM, alpha))
+                screen.blit(avg_surf, (x, y))
+                y += avg_surf.get_height() + 8
+            else:
+                y += 8
+        return y
+
+    def _draw_academic_section(self, screen, student, day_count,
+                                x, w, y, alpha) -> int:
+        y        = self._draw_section(screen, "ACADEMIC RECORD", x, w, y, alpha)
+        s        = student.stats
+        attended = s["classes_attended"]
+        skipped  = s["classes_skipped"]
+        total    = max(1, attended + skipped)
+        att_pct  = attended / total * 100
+        att_color = (self._C_GOOD if att_pct >= 75 else
+                     self._C_WARN if att_pct >= 50 else
+                     self._C_BAD)
+        rows = [
+            ("Classes Attended", f"{attended}",
+             self._C_GOOD),
+            ("Classes Skipped",  f"{skipped}",
+             self._C_BAD if skipped > 0 else self._C_DIM),
+            ("Attendance Rate",  f"{att_pct:.0f}%",
+             att_color),
+            ("Target CGPA",      f"{student.target_cgpa:.2f}",
+             self._C_RECORDS),
+        ]
+        for label, value, color in rows:
+            y = self._draw_key_value(screen, label, value, x, w, y, alpha, color)
+        return y
+
+    def _draw_wellness_section(self, screen, student,
+                                x, w, y, alpha) -> int:
+        y = self._draw_section(screen, "WELLNESS RECORD", x, w, y, alpha)
+        s = student.stats
+
+        def _wcol(v):
+            return self._C_WELLNESS if v > 0 else self._C_GOOD
+
+        rows = [
+            ("Times Sick",
+             f"{s['times_sick']}",              _wcol(s['times_sick'])),
+            ("Total Sick Days",
+             f"{s['total_sick_days']}",          _wcol(s['total_sick_days'])),
+            ("Longest Sick Streak",
+             f"{s['longest_sick_streak']} days", _wcol(s['longest_sick_streak'])),
+            ("Burnout Episodes",
+             f"{s['burnout_occurrences']}",      _wcol(s['burnout_occurrences'])),
+            ("Days Burnt Out",
+             f"{s['days_burnt_out']}",           _wcol(s['days_burnt_out'])),
+        ]
+        for label, value, color in rows:
+            y = self._draw_key_value(screen, label, value, x, w, y, alpha, color)
+
+        if student.consecutive_stress_days >= 3:
+            hint = f"! High stress {student.consecutive_stress_days} days in a row"
+            hint_surf = self._f_detail.render(
+                hint, True, self._alpha_color(self._C_BAD, alpha))
+            screen.blit(hint_surf, (x, y))
+            y += hint_surf.get_height() + 6
+        return y
+
+    def _draw_lifestyle_section(self, screen, student, day_count,
+                                 x, w, y, alpha) -> int:
+        y    = self._draw_section(screen, "LIFESTYLE", x, w, y, alpha)
+        s    = student.stats
+        days = max(1, day_count)
+        coffees = s["coffees_drunk"]
+        meals   = s["meals_eaten"]
+        cpd     = coffees / days
+        mpd     = meals   / days
+        c_color = self._C_BAD if cpd > 2.0 else self._C_LIFESTYLE
+        m_color = self._C_GOOD if mpd >= 2.0 else self._C_WARN
+        y = self._draw_key_value(screen, "Coffees Drunk",
+                                  f"{coffees}  ({cpd:.1f}/day)",
+                                  x, w, y, alpha, c_color)
+        y = self._draw_key_value(screen, "Meals Eaten",
+                                  f"{meals}  ({mpd:.1f}/day)",
+                                  x, w, y, alpha, m_color)
+        if mpd < 1.5:
+            warn_surf = self._f_detail.render(
+                "Eat more! Low meals hurt health.", True,
+                self._alpha_color(self._C_BAD, alpha))
+            screen.blit(warn_surf, (x, y))
+            y += warn_surf.get_height() + 6
+        return y
+
+    def _draw_records_section(self, screen, student,
+                               x, w, y, alpha) -> int:
+        y  = self._draw_section(screen, "ALL-TIME RECORDS", x, w, y, alpha)
+        s  = student.stats
+        ps = s["peak_stress"]
+        lh = s["lowest_health"]
+        pm = s["peak_motivation"]
+        rows = [
+            ("Peak Stress",
+             f"{ps}",
+             self._C_BAD  if ps > 80 else
+             self._C_WARN if ps > 60 else self._C_GOOD),
+            ("Lowest Health",
+             f"{lh}",
+             self._C_BAD  if lh < 30 else
+             self._C_WARN if lh < 50 else self._C_GOOD),
+            ("Peak Motivation",
+             f"{pm}",
+             self._C_GOOD if pm > 70 else self._C_WARN),
+        ]
+        for label, value, color in rows:
+            y = self._draw_key_value(screen, label, value, x, w, y, alpha, color)
+        return y
+
+    # ── Private drawing helpers ──────────────────────────────────────────
+
+    def _draw_key_value(self, screen, label: str, value: str,
+                        x: int, w: int, y: int,
+                        alpha: int, value_color: tuple) -> int:
+        lbl_surf = self._f_body.render(label, True,
+                                        self._alpha_color(self._C_TEXT, alpha))
+        val_surf = self._f_body.render(value, True,
+                                        self._alpha_color(value_color, alpha))
+        screen.blit(lbl_surf, (x, y))
+        screen.blit(val_surf, (x + w - val_surf.get_width(), y))
+        return y + lbl_surf.get_height() + 6
+
+    def _draw_mini_bar(self, screen, x: int, w: int, y: int,
+                       fraction: float, color: tuple, alpha: int) -> int:
+        bar_h = 5
+        bg = pygame.Surface((w, bar_h), pygame.SRCALPHA)
+        bg.fill((*self._C_DIVIDER, alpha))
+        screen.blit(bg, (x, y))
+        fill_w = int(w * max(0.0, min(fraction, 1.0)))
+        if fill_w > 0:
+            fill = pygame.Surface((fill_w, bar_h), pygame.SRCALPHA)
+            fill.fill((*color, alpha))
+            screen.blit(fill, (x, y))
+        return y + bar_h + 4
+
+    def _draw_divider(self, screen, x: int, w: int, y: int, alpha: int) -> int:
+        y += 6
+        surf = pygame.Surface((w, 1), pygame.SRCALPHA)
+        surf.fill((*self._C_DIVIDER, alpha))
+        screen.blit(surf, (x, y))
+        return y + 12
+
+    def _draw_section(self, screen, title: str,
+                      x: int, w: int, y: int, alpha: int) -> int:
+        lbl = self._f_heading.render(title, True,
+                                      self._alpha_color(self._C_GLOW, alpha))
+        screen.blit(lbl, (x, y))
+        y += lbl.get_height() + 2
+        underline = pygame.Surface((w, 1), pygame.SRCALPHA)
+        underline.fill((*self._C_GLOW, alpha // 3))
+        screen.blit(underline, (x, y))
+        return y + 10
+
+    @staticmethod
+    def _alpha_color(rgb, alpha: int):
+        return (rgb[0], rgb[1], rgb[2])
+
+    def _ensure_fonts(self):
+        if self._fonts_loaded:
+            return
+        self._f_heading    = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
+        self._f_body       = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
+        self._f_detail     = pygame.font.Font("assets/fonts/Papernotes.otf", 14)
+        self._fonts_loaded = True
