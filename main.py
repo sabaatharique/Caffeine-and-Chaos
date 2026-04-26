@@ -723,14 +723,14 @@ pending_action: str | None = None
 # Status bars
 bar_w = 130
 bar_h = 16
-bar_space = (WIDTH - 6 * bar_w) / 7
+bar_space = ((WIDTH - 50 - 6 * bar_w) / 7) 
 bars = [
-    StatusBar(bar_space, 60, bar_w, bar_h, "Knowledge", message_font),
-    StatusBar(bar_space*2 + bar_w, 60, bar_w, bar_h, "Sleep", message_font),
-    StatusBar(bar_space*3 + bar_w*2, 60, bar_w, bar_h, "Health", message_font),
-    StatusBar(bar_space*4 + bar_w*3, 60, bar_w, bar_h, "Stress", message_font),
-    StatusBar(bar_space*5 + bar_w*4, 60, bar_w, bar_h, "Motivation", message_font),
-    StatusBar(bar_space*6 + bar_w*5, 60, bar_w, bar_h, "Hunger", message_font),
+    StatusBar(50, 60, bar_w, bar_h, "Knowledge", message_font),
+    StatusBar(50 + bar_space + bar_w, 60, bar_w, bar_h, "Sleep", message_font),
+    StatusBar(50 + bar_space*2 + bar_w*2, 60, bar_w, bar_h, "Health", message_font),
+    StatusBar(50 + bar_space*3 + bar_w*3, 60, bar_w, bar_h, "Stress", message_font),
+    StatusBar(50 + bar_space*4 + bar_w*4, 60, bar_w, bar_h, "Motivation", message_font),
+    StatusBar(50 + bar_space*5 + bar_w*5, 60, bar_w, bar_h, "Hunger", message_font),
 ]
 
 # Action buttons

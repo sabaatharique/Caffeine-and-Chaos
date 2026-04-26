@@ -2453,7 +2453,7 @@ class StatsDashboard:
     """Left-side sliding panel showing lifetime student statistics."""
 
     _PANEL_W     = 280
-    _TAB_W       = 28    # visible tab strip when collapsed
+    _TAB_W       = 24    # visible tab strip when collapsed
     _ANIM_SPEED  = 8.0
 
     _C_BG        = (14, 14, 28, 240)
@@ -2547,7 +2547,7 @@ class StatsDashboard:
                          (*self._C_GLOW, glow_alpha),
                          (panel_w, 0), (panel_w, sh), 2)
 
-        # ── Collapsed tab label: "My Stats" rotated vertically ─────────────
+        # Collapsed tab label: "My Stats" rotated vertically
         tab_label_alpha = int(max(0, (1.0 - t) / 0.5) * 220)
         if tab_label_alpha > 0 and self._f_tab is not None:
             tab_surf = self._f_tab.render("My Stats", True, (180, 155, 255))
@@ -2562,9 +2562,9 @@ class StatsDashboard:
         if content_alpha <= 0:
             return
 
-        content_x = self._TAB_W + 10
-        content_w = panel_w - self._TAB_W - 20
-        y         = 18 - int(self.scroll_y)
+        content_x = 15
+        content_w = panel_w - 50
+        y = 18 - int(self.scroll_y)
 
         old_clip = screen.get_clip()
         screen.set_clip((0, 0, panel_w, sh))
@@ -2590,7 +2590,7 @@ class StatsDashboard:
         screen.set_clip(old_clip)
         self.max_scroll = max(0.0, y + int(self.scroll_y) - sh + 20)
 
-        # ── Collapse arrow (inner right edge of expanded panel) ──────────────
+        # Collapse arrow (inner right edge of expanded panel)
         arrow_alpha = int(max(0, (t - 0.5) / 0.5) * 210)
         if arrow_alpha > 0:
             ar = 10  # radius
@@ -2610,7 +2610,7 @@ class StatsDashboard:
         else:
             self._collapse_arrow_rect = None
 
-    # ── Section renderers ────────────────────────────────────────────────
+    # Section renderers
 
     def _draw_trends_section(self, screen, student, week_count,
                              x: int, w: int, y: int, alpha: int) -> int:
@@ -2624,19 +2624,19 @@ class StatsDashboard:
         def _trend(snap: list, higher_is_better: bool):
             """Return (arrow_str, delta_str, color) for a snapshot list."""
             if len(snap) < 2:
-                return "–", "n/a", self._C_DIM
+                return "-", "n/a", self._C_DIM
             delta = snap[-1] - snap[0]
             if abs(delta) < 1.0:
-                return "–", f"{delta:+.0f}", self._C_DIM
+                return "-", f"{delta:+.0f}", self._C_DIM
             if higher_is_better:
-                arrow = "↑" if delta > 0 else "↓"
+                arrow = "^" if delta > 0 else "v"
                 color = self._C_GOOD if delta > 0 else self._C_BAD
             else:
-                arrow = "↑" if delta > 0 else "↓"
+                arrow = "^" if delta > 0 else "v"
                 color = self._C_BAD if delta > 0 else self._C_GOOD
             return arrow, f"{delta:+.0f}", color
 
-        # -- Stress / Health / Motivation trends --
+        # Stress / Health / Motivation trends 
         for label, snap, higher_good in [
             ("Stress",     stress_snap, False),
             ("Health",     health_snap, True),
@@ -2658,7 +2658,7 @@ class StatsDashboard:
         screen.blit(best_day_surf, (x, y))
 
         study_h = student._week_study_hours
-        best_label = "–"
+        best_label = "-"
         if study_h and stress_snap:
             from environment import DAYS_OF_WEEK
             scores = [
@@ -2859,7 +2859,7 @@ class StatsDashboard:
             y = self._draw_key_value(screen, label, value, x, w, y, alpha, color)
         return y
 
-    # ── Private drawing helpers ──────────────────────────────────────────
+    #  Private drawing helpers 
 
     def _draw_key_value(self, screen, label: str, value: str,
                         x: int, w: int, y: int,
