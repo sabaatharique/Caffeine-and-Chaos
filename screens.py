@@ -343,6 +343,7 @@ def midterm_results_screen(screen, course_manager, continue_btn, scroll_y=0):
     screen.blit(fade, (0, HEIGHT - fade_h))
 
     # Continue button
+    continue_btn.text = "Continue"
     continue_btn.rect.centerx = WIDTH // 2
     continue_btn.rect.y       = HEIGHT - 64
     continue_btn.draw(screen)
@@ -365,7 +366,7 @@ def post_mid_choice_screen(screen, repeat_btn, manual_btn, font):
     screen.blit(overlay, (0, 0))
 
     # Card
-    card_w, card_h = 540, 280
+    card_w, card_h = 540, 300
     card_x = (WIDTH  - card_w) // 2
     card_y = (HEIGHT - card_h) // 2 - 20
     card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
@@ -382,13 +383,13 @@ def post_mid_choice_screen(screen, repeat_btn, manual_btn, font):
 
     # Body lines
     lines = [
-        "Midterms are done. What's your plan for the rest of the semester?",
+        "  Midterms are done. What's your plan for the rest of the semester?",
         "",
-        "  Repeat Pre-Mid Style  →  automatically replays your pre-mid week",
+        "  Repeat Pre-Mid Style  -  automatically replays your pre-mid week",
         "  pattern (actions, hours, courses) for all remaining class weeks.",
         "  Quizzes and labs will still interrupt for you to decide.",
         "",
-        "  Play Manually  →  you control every day as usual.",
+        "  Play Manually  -  you control every day as usual.\n",
     ]
     body_font = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
     y = card_y + 74
@@ -564,7 +565,7 @@ def exam_prep_screen(screen, exam_entry: dict, days_until: int, exam_idx: int, t
 
 
 def exam_taking_screen(screen, exam_entry: dict, exam_type: str,
-                       take_btn, skip_btn, font) -> None:
+                       take_btn, skip_btn, font, is_sick: bool = False) -> None:
     from environment import DAYS_OF_WEEK
     WIDTH, HEIGHT = screen.get_width(), screen.get_height()
 
@@ -616,6 +617,30 @@ def exam_taking_screen(screen, exam_entry: dict, exam_type: str,
 
     pygame.draw.line(screen, (60, 55, 120),
                      (card_x + 40, card_y + 224), (card_x + card_w - 40, card_y + 224), 1)
+
+    # Sick warning — shown above the buttons when player is ill
+    if is_sick:
+        sick_font   = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
+        sick_head   = pygame.font.Font("assets/fonts/Papernotes.otf", 19)
+        warn_w = card_w - 40
+        warn_x = card_x + 20
+        warn_y = HEIGHT - 140
+
+        # Warning card background
+        warn_surf = pygame.Surface((warn_w, 52), pygame.SRCALPHA)
+        warn_surf.fill((80, 10, 10, 210))
+        screen.blit(warn_surf, (warn_x, warn_y))
+        pygame.draw.rect(screen, (220, 60, 60), (warn_x, warn_y, warn_w, 52), 2, border_radius=6)
+
+        # Warning icon + headline
+        head_surf = sick_head.render("You are sick!", True, (255, 80, 80))
+        screen.blit(head_surf, (warn_x + warn_w // 2 - head_surf.get_width() // 2, warn_y + 6))
+
+        # Detail line
+        detail_surf = sick_font.render(
+            "Illness will significantly reduce your exam score.", True, (255, 160, 140))
+        screen.blit(detail_surf,
+                    (warn_x + warn_w // 2 - detail_surf.get_width() // 2, warn_y + 28))
 
     take_btn.text = "Take Exam"
     take_btn.rect.centerx = WIDTH // 2 - 70

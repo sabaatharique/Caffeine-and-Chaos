@@ -135,15 +135,25 @@ class Course:
     def generate_mid_mark(self, week, stress=0, sleep=100, health=100, is_sick=False):
         if self.course_type != "Theory":
             return None
-            
-        if is_sick:
-            self.mid_mark = 0
-            return 0
 
         randomness = random.uniform(-8, 8)
         expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
+
+        if is_sick:
+            # Sickness: heavy penalty — knowledge efficiency halved, health/sleep treated as very low,
+            # extra negative randomness, and mark capped at 55% regardless.
+            effective_progress = progress * 0.45
+            base = (
+                0.7 * (effective_progress * 100) +
+                0.15 * min(sleep, 30) +
+                0.15 * min(health, 30) -
+                0.2 * max(stress, 60)
+            )
+            sick_roll = random.uniform(-15, 0)
+            self.mid_mark = max(0, min(55, base + randomness + sick_roll))
+            return self.mid_mark
 
         base = (
             0.7 * (progress * 100) +
@@ -159,15 +169,25 @@ class Course:
     def generate_final_mark(self, week, stress=0, sleep=100, health=100, is_sick=False):
         if self.course_type != "Theory":
             return None
-            
-        if is_sick:
-            self.final_mark = 0
-            return 0
 
         randomness = random.uniform(-5, 5)
         expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
+
+        if is_sick:
+            # Sickness: heavy penalty — knowledge efficiency halved, health/sleep treated as very low,
+            # extra negative randomness, and mark capped at 50% regardless.
+            effective_progress = progress * 0.40
+            base = (
+                0.75 * (effective_progress * 100) +
+                0.1 * min(sleep, 25) +
+                0.15 * min(health, 25) -
+                0.2 * max(stress, 65)
+            )
+            sick_roll = random.uniform(-18, 0)
+            self.final_mark = max(0, min(50, base + randomness + sick_roll))
+            return self.final_mark
 
         base = (
             0.75 * (progress * 100) +
@@ -211,15 +231,24 @@ class Course:
             if la["assessment_type"] == "lab_mid" and la["missed"]:
                 self.lab_mid = 0
                 return 0
-            
-        if is_sick:
-            self.lab_mid = 0
-            return 0
 
         randomness = random.uniform(-5, 5)
         expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
+
+        if is_sick:
+            # Sickness: heavy penalty — knowledge efficiency halved, health crushed,
+            # and mark capped at 55%.
+            effective_progress = progress * 0.45
+            base = (
+                0.7 * (effective_progress * 100) +
+                0.2 * min(health, 30) -
+                0.2 * max(stress, 60)
+            )
+            sick_roll = random.uniform(-15, 0)
+            self.lab_mid = max(0, min(55, base + randomness + sick_roll))
+            return self.lab_mid
 
         base = (
             0.7 * (progress * 100) +
@@ -233,20 +262,29 @@ class Course:
     def generate_lab_final(self, week, stress=0, health=100, is_sick=False):
         if self.course_type != "Lab":
             return None
-            
+
         for la in self.scheduled_lab_assessments:
             if la["assessment_type"] == "lab_final" and la["missed"]:
                 self.lab_final = 0
                 return 0
 
-        if is_sick:
-            self.lab_final = 0
-            return 0
-
         randomness = random.uniform(-5, 5)
         expected_knowledge = 10.0 + (self.occurred_classes / max(1, self.total_classes)) * 90.0
         progress = self.knowledge / max(1.0, expected_knowledge)
         progress = min(1.0, progress)
+
+        if is_sick:
+            # Sickness: heavy penalty — knowledge efficiency halved, health crushed,
+            # and mark capped at 50%.
+            effective_progress = progress * 0.40
+            base = (
+                0.75 * (effective_progress * 100) +
+                0.2 * min(health, 25) -
+                0.2 * max(stress, 65)
+            )
+            sick_roll = random.uniform(-18, 0)
+            self.lab_final = max(0, min(50, base + randomness + sick_roll))
+            return self.lab_final
 
         base = (
             0.75 * (progress * 100) +

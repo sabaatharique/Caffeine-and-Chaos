@@ -2453,7 +2453,7 @@ class StatsDashboard:
     """Left-side sliding panel showing lifetime student statistics."""
 
     _PANEL_W     = 280
-    _TAB_W       = 24    # visible tab strip when collapsed
+    _TAB_W       = 25    # visible tab strip when collapsed
     _ANIM_SPEED  = 8.0
 
     _C_BG        = (14, 14, 28, 240)
