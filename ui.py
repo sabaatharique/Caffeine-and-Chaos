@@ -1816,7 +1816,7 @@ class QuizResultBox:
         if m >= 70: return "B"
         if m >= 60: return "C"
         if m >= 50: return "D"
-        return "F"
+        return "Referred"
 
     def _grade_color(self):
         return self._GRADE_COLORS[self._grade_letter()]

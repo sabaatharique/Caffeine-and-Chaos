@@ -216,9 +216,15 @@ def _draw_course_card(screen, course, card_x, card_y, card_w,
 
     # 2. Theory / Lab marks
     if course.course_type == "Theory":
-        if course.quiz_marks:
+        if course.scheduled_quizzes:
             max_mark = 5 * course.credits
-            marks_str = "  ".join(f"Q{i+1}: {m / 100 * max_mark:.1f}/{max_mark}" for i, m in enumerate(course.quiz_marks))
+            parts = []
+            for q in sorted(course.scheduled_quizzes, key=lambda q: q["quiz_number"]):
+                if q["taken"] and not q["missed"] and q["mark"] is not None:
+                    parts.append(f"Q{q['quiz_number']}: {q['mark'] / 100 * max_mark:.1f}/{max_mark}")
+                else:
+                    parts.append(f"Q{q['quiz_number']}: 0/{max_mark}")
+            marks_str = "  ".join(parts)
             rows.append(("Quizzes:", marks_str, None))
         if course.mid_mark is not None:
             rows.append(("Midterm:", f"{course.mid_mark:.1f}%", None))

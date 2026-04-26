@@ -128,7 +128,6 @@ class Course:
         )
 
         mark = max(0, min(100, base + randomness))
-        self.quiz_marks.append(mark)
         return mark
 
 
@@ -264,12 +263,20 @@ class Course:
         """
         # THEORY 
         if self.course_type == "Theory":
-            if len(self.quiz_marks) < 4 or \
+            if len(self.scheduled_quizzes) < 4 or \
                self.mid_mark is None or \
                self.final_mark is None:
                 return None
 
-            best_quizzes = sorted(self.quiz_marks, reverse=True)[:3]
+            # Collect all 4 quiz marks — missed or unresolved quizzes count as 0
+            all_quiz_marks = []
+            for q in sorted(self.scheduled_quizzes, key=lambda q: q["quiz_number"]):
+                if q["taken"] and not q["missed"] and q["mark"] is not None:
+                    all_quiz_marks.append(q["mark"])
+                else:
+                    all_quiz_marks.append(0.0)
+
+            best_quizzes = sorted(all_quiz_marks, reverse=True)[:3]
             quiz_avg = sum(best_quizzes) / len(best_quizzes) if best_quizzes else 0
 
             total_percentage = (
@@ -368,7 +375,7 @@ class Course:
         if pct >= 50:  return "C+"
         if pct >= 45:  return "C"
         if pct >= 40:  return "D"
-        return "F"
+        return "Referred"
 
     @staticmethod
     def required_knowledge_for_pct(target_pct, sleep, health, stress, expected_knowledge, course_type="Theory"):
