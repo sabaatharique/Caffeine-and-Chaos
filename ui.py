@@ -844,6 +844,111 @@ class QuizInterruptBox:
         screen.blit(s_surf, s_surf.get_rect(center=self._skip_btn.center))
 
 
+class SickQuizInterruptBox:
+    """Modal shown when a quiz/lab assessment slot is reached while the student is sick.
+    Informs the player the assessment was auto-missed; only an 'OK / Understood' button.
+    Works for both Theory quizzes and Lab assessments.
+    """
+
+    _BG         = (55, 10, 10)
+    _BORDER     = (220, 40, 40)
+    _TITLE_C    = (255, 110, 110)
+    _BODY_C     = (240, 210, 210)
+    _BTN_BG     = (180, 30, 30)
+    _BTN_BORDER = (255, 130, 130)
+
+    def __init__(self, font, smallfont):
+        self.font      = font
+        self.smallfont = smallfont
+        self.active    = False
+
+        self._course    = None
+        self._label     = ""   # e.g. "Quiz 2" or "Lab Midterm"
+        self._ok_btn    = None
+
+    def open(self, course, label: str):
+        self.active  = True
+        self._course = course
+        self._label  = label
+
+    def handle_event(self, event) -> bool:
+        """Return True when the player dismisses the box, False otherwise."""
+        if not self.active:
+            return False
+
+        if event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+                self.active = False
+                return True
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._ok_btn and self._ok_btn.collidepoint(event.pos):
+                self.active = False
+                return True
+
+        return False
+
+    def draw(self, screen):
+        if not self.active:
+            return
+
+        sw, sh = screen.get_size()
+
+        # Red-tinted overlay
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((120, 0, 0, 130))
+        screen.blit(overlay, (0, 0))
+
+        box_w, box_h = 500, 260
+        box_x = (sw - box_w) // 2
+        box_y = (sh - box_h) // 2
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+
+        pygame.draw.rect(screen, self._BG,     box_rect, border_radius=14)
+        pygame.draw.rect(screen, self._BORDER, box_rect, 3, border_radius=14)
+
+        # Header stripe
+        stripe = pygame.Rect(box_x, box_y, box_w, 44)
+        pygame.draw.rect(screen, (100, 15, 15), stripe, border_radius=14)
+        pygame.draw.rect(screen, (100, 15, 15),
+                         pygame.Rect(box_x, box_y + 22, box_w, 22))
+
+        # Skull / sick icon text
+        icon_surf = self.font.render("Assessment Missed!", True, self._TITLE_C)
+        screen.blit(icon_surf, icon_surf.get_rect(centerx=box_rect.centerx, y=box_y + 8))
+
+        y = box_y + 62
+        course_name = self._course.name if self._course else "Unknown"
+        cname_surf = self.font.render(
+            f"{self._label} - {course_name}", True, (255, 200, 200))
+        screen.blit(cname_surf, cname_surf.get_rect(centerx=box_rect.centerx, y=y))
+        y += cname_surf.get_height() + 10
+
+        lines = [
+            "You were too sick to sit this assessment.",
+            "It has been recorded as a missed attempt.",
+            "Rest up and take care of your health!",
+        ]
+        for line in lines:
+            surf = self.smallfont.render(line, True, self._BODY_C)
+            screen.blit(surf, surf.get_rect(centerx=box_rect.centerx, y=y))
+            y += surf.get_height() + 6
+
+        # OK button
+        btn_w, btn_h = 160, 42
+        self._ok_btn = pygame.Rect(
+            box_rect.centerx - btn_w // 2,
+            box_rect.bottom - btn_h - 18,
+            btn_w, btn_h
+        )
+        mouse = pygame.mouse.get_pos()
+        btn_col = (220, 50, 50) if self._ok_btn.collidepoint(mouse) else self._BTN_BG
+        pygame.draw.rect(screen, btn_col, self._ok_btn, border_radius=8)
+        pygame.draw.rect(screen, self._BTN_BORDER, self._ok_btn, 2, border_radius=8)
+        ok_surf = self.font.render("Continue  [Enter]", True, (255, 255, 255))
+        screen.blit(ok_surf, ok_surf.get_rect(center=self._ok_btn.center))
+
+
 class LabAssessmentInterruptBox:
     """Modal shown during live-play and replay when a scheduled lab mid/final slot is reached.
     Player can choose to Take or Skip the assessment.
@@ -2266,7 +2371,7 @@ class AcademicDashboard:
         y += 10
         y = self._draw_section(screen, "QUIZ HISTORY", content_x, content_w, y, content_alpha)
         
-        history = self._get_quiz_history(course_manager)
+        history = self._get_quiz_history(course_manager, week_count)
         if not history:
             y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
         else:
@@ -2305,7 +2410,7 @@ class AcademicDashboard:
         y += 10
         y = self._draw_section(screen, "LAB TEST HISTORY", content_x, content_w, y, content_alpha)
         
-        lab_history = self._get_lab_history(course_manager)
+        lab_history = self._get_lab_history(course_manager, week_count)
         if not lab_history:
             y = self._draw_dim_line(screen, "No attempts yet.", content_x, y, content_alpha)
         else:
@@ -2398,12 +2503,17 @@ class AcademicDashboard:
         return y + sub_surf.get_height() + 8
 
     def _get_upcoming_quizzes(self, course_manager, week_count: int) -> list[dict]:
-        """Fetch quizzes for this week and next week."""
+        """Fetch untaken quizzes for this week and next week only.
+
+        Quizzes whose scheduled week is strictly in the past (< current week)
+        are omitted here — they will appear in quiz history instead.
+        """
         res = []
         for course in course_manager.courses:
             if course.course_type != "Theory": continue
             for q in course.scheduled_quizzes:
                 if q["taken"]: continue
+                if q["week"] < week_count: continue   # past weeks go to history
                 weeks_away = q["week"] - week_count
                 if 0 <= weeks_away <= 1:
                     res.append({**q, "course_name": course.name})
@@ -2412,38 +2522,54 @@ class AcademicDashboard:
         return res
 
     def _get_upcoming_lab_assessments(self, course_manager, week_count: int) -> list[dict]:
-        """Fetch lab assessments for this week and next week."""
+        """Fetch untaken lab assessments for this week and next week only.
+
+        Past-week entries are omitted and shown in lab test history instead.
+        """
         res = []
         for course in course_manager.courses:
             if course.course_type != "Lab": continue
             for la in getattr(course, "scheduled_lab_assessments", []):
                 if la["taken"]: continue
+                if la["week"] < week_count: continue   # past weeks go to history
                 weeks_away = la["week"] - week_count
                 if 0 <= weeks_away <= 1:
                     res.append({**la, "course_name": course.name})
         res.sort(key=lambda x: (x["week"], x["day_idx"], x["slot_idx"]))
         return res
 
-    def _get_quiz_history(self, course_manager) -> list[dict]:
-        """Fetch all quizzes that have already been taken or missed."""
+    def _get_quiz_history(self, course_manager, week_count: int = 9999) -> list[dict]:
+        """Fetch all quizzes that are resolved (taken=True) OR whose scheduled
+        week is already in the past (they're de-facto missed even if the sweep
+        hasn't run yet — shown as MISSED without mutating state).
+        """
         res = []
         for course in course_manager.courses:
             if course.course_type != "Theory": continue
             for q in course.scheduled_quizzes:
                 if q["taken"]:
                     res.append({**q, "course_name": course.name})
+                elif q["week"] < week_count:
+                    # Past week, not yet swept — display as missed
+                    res.append({**q, "course_name": course.name,
+                                "taken": True, "missed": True})
         # Sort by week (descending) then quiz number
         res.sort(key=lambda x: (x["week"], x["quiz_number"]), reverse=True)
         return res
 
-    def _get_lab_history(self, course_manager) -> list[dict]:
-        """Fetch all lab tests that have already been taken or missed."""
+    def _get_lab_history(self, course_manager, week_count: int = 9999) -> list[dict]:
+        """Fetch all lab tests that are resolved (taken=True) OR whose scheduled
+        week is already in the past (shown as MISSED without mutating state).
+        """
         res = []
         for course in course_manager.courses:
             if course.course_type != "Lab": continue
             for la in course.scheduled_lab_assessments:
                 if la["taken"]:
                     res.append({**la, "course_name": course.name})
+                elif la["week"] < week_count:
+                    res.append({**la, "course_name": course.name,
+                                "taken": True, "missed": True})
         # Sort by week (descending)
         res.sort(key=lambda x: x["week"], reverse=True)
         return res

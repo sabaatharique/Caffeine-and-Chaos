@@ -124,7 +124,7 @@ def generate_lab_assessment_schedule(weekly_slots):
     # lab-mid: raw weeks 6-7 (same as display; before midterm exams at raw 8-9)
     mid_weeks    = [6, 7]
     mid_weights  = [4, 6]
-    # lab-final: raw weeks 14-15 (display 12-13; safely before finals at raw 16-18)
+    # lab-final: raw weeks 14-15 (display 12-13; safely before finals at raw 18-20)
     final_weeks  = [14, 15]
     final_weights = [4, 6]
 

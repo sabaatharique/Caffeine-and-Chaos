@@ -9,7 +9,7 @@ from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
                 QuizResultBox, AcademicDashboard, StatsDashboard, QuizWeekPromptBox,
                 QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox,
-                Checkbox)
+                SickQuizInterruptBox, Checkbox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
                      exam_screen, midterm_results_screen, semester_end_screen,
                      semester_stats_screen, post_mid_choice_screen,
@@ -360,6 +360,11 @@ class WeekReplayRunner:
         self.weeks_done   += 1
         self.day_in_week   = 0
         self.current_week += 1
+        # Hard stop: never enter an exam week automatically
+        from environment import MIDTERM_EXAM_WEEKS, FINAL_EXAM_WEEKS
+        if self.current_week in MIDTERM_EXAM_WEEKS or self.current_week in FINAL_EXAM_WEEKS:
+            self.done = True
+            return
         # Rewind quizzes for the week we're about to replay
         self.course_manager.reset_quizzes_for_week(self.current_week)
 
@@ -472,8 +477,9 @@ class WeekReplayRunner:
             # Stop after completing Friday (day 5) of the last pre-exam week
             # (raw week 7 = last week before midterm; raw week 17 = last week before finals)
             _completed_week = self.current_week
+            _day_just_done = self.day_in_week
             _is_last_pre_exam = (_completed_week in (7, 17))
-            _finished_friday = (self.day_in_week == 5)
+            _finished_friday = (_day_just_done >= 5)
             if _is_last_pre_exam and _finished_friday:
                 # Stop cleanly to let player play weekend manually
                 self.done = True
@@ -662,14 +668,26 @@ _exam_prep_replay_runner = None    # ExamPrepReplayRunner instance
 
 def get_semester_phase(wk: int) -> str:
     """Return the current semester phase based on raw week number.
-    Raw timeline: 1-7 pre-mid, 8-9 midterm exams, 10-17 post-mid, 18-20 final exams.
+    Raw timeline: 1-7 pre-mid, 8-9 midterm exams, 10-17 post-mid (display 8-15), 18-20 finals.
     """
     if wk <= 7:
         return "pre_mid"
+    elif wk <= 9:
+        return "mid_exams"
     elif wk <= 17:
         return "post_mid"
     else:
-        return "done"
+        return "finals"
+
+
+def _raw_to_display_week(raw: int) -> int:
+    """Convert raw week to display week per the semester calendar."""
+    if raw <= 9:
+        return raw                   # pre-mid and midterm exams: raw == display
+    elif raw <= 17:
+        return raw - 2               # post-mid class weeks: 10→8 … 17→15
+    else:
+        return raw - 2               # finals: 18→16, 19→17, 20→18
 
 
 def _max_week_repeats(wk: int) -> int:
@@ -678,7 +696,7 @@ def _max_week_repeats(wk: int) -> int:
     if phase == "pre_mid":
         return max(0, 7 - wk)
     elif phase == "post_mid":
-        return max(0, 17 - wk)
+        return max(0, 16 - wk)    # post-mid class weeks end at raw 17
     return 0
 
 # Assets
@@ -716,6 +734,7 @@ quiz_week_prompt_box = QuizWeekPromptBox(alert_title_font, alert_body_font)
 quiz_interrupt_box = QuizInterruptBox(button_font, input_font)
 lab_assessment_interrupt_box = LabAssessmentInterruptBox(button_font, input_font)
 lab_assessment_result_box = LabAssessmentResultBox(WIDTH, HEIGHT)
+sick_quiz_interrupt_box = SickQuizInterruptBox(button_font, message_font)
 academic_dashboard = AcademicDashboard(
     WIDTH, HEIGHT,
     message_font,
@@ -928,23 +947,47 @@ class ExamPrepReplayRunner:
 
 
 def sweep_missed_assessments(c_manager, d_count, out_list):
-    """Mark unresolved quizzes/labs for today as missed and append notifications."""
+    """Mark unresolved quizzes/labs as missed.
+
+    Two passes:
+    1. Today's unresolved slots (existing behaviour — fires at day-end).
+    2. Any slot from a *strictly previous* week that somehow survived without
+       being taken (e.g. due to replay resets or day skips).  These are
+       marked silently (no message) to keep the notification feed clean.
+
+    Note: It is strictly assumed that this function is only called at the end
+    of the day (from `_check_day_end` or when completing days in replay).
+    If it were called mid-day, the same-day sweep below would trigger prematurely.
+    """
     diw = ((d_count - 1) % 7) + 1
     wk = ((d_count - 1) // 7) + 1
+
     for c in c_manager.courses:
         if c.course_type == "Theory":
             for q in c.scheduled_quizzes:
-                if not q["taken"] and q["week"] == wk and q["day_idx"] == (diw - 1):
+                if q["taken"]:
+                    continue
+                if q["week"] == wk and q["day_idx"] == (diw - 1):
+                    # Today's slot — mark with a message
                     q["taken"] = True
                     q["missed"] = True
                     out_list.append(f"[QUIZ] {c.name} — Quiz {q['quiz_number']} SKIPPED (timeout).")
+                elif q["week"] < wk:
+                    # Past week — sweep silently
+                    q["taken"] = True
+                    q["missed"] = True
         elif c.course_type == "Lab":
             for la in getattr(c, "scheduled_lab_assessments", []):
-                if not la["taken"] and la["week"] == wk and la["day_idx"] == (diw - 1):
+                if la["taken"]:
+                    continue
+                if la["week"] == wk and la["day_idx"] == (diw - 1):
                     la["taken"] = True
                     la["missed"] = True
                     atype = la["assessment_type"].replace('_', ' ').title()
                     out_list.append(f"[LAB] {c.name} — {atype} SKIPPED (timeout).")
+                elif la["week"] < wk:
+                    la["taken"] = True
+                    la["missed"] = True
 
 
 def _check_day_end(new_msgs: list[str]) -> list[str]:
@@ -1003,7 +1046,9 @@ while running:
     # Derive week tracking from day_count (always consistent, works with any runner)
     day_in_week = ((day_count - 1) % 7) + 1   # 1-7
     week_count = ((day_count - 1) // 7) + 1  # 1, 2, ...
-    _display_wc = week_count if week_count <= 7 else (week_count - 2 if week_count >= 10 else week_count)
+    # Display week: pre-mid 1-7 (raw==display), mid-exams 8-9 (raw==display),
+    # post-mid 10-17 → display 8-15 (subtract 2), finals 18-20 → display 16-18
+    _display_wc = _raw_to_display_week(week_count)
 
     # Button enable state
     if day_over or remaining_hours <= 0:
@@ -1137,7 +1182,12 @@ while running:
                         if c.course_type == "Lab" and not getattr(c, "scheduled_lab_assessments", []):
                             course_manager.schedule_all_lab_assessments()
 
-                    # Route to the correct screen based on saved state
+                    # Sweep any past-week quizzes/labs that were not resolved
+                    # (can happen after replays or when loading an old save).
+                    _sweep_msgs: list = []
+                    sweep_missed_assessments(course_manager, day_count, _sweep_msgs)
+                    del _sweep_msgs  # discard — no alert needed on load
+
                     if week_count in FINAL_EXAM_WEEKS and _exam_period_type == "final":
                         if _exam_idx < len(_exam_schedule):
                             current_screen_state = EXAM_PREP_SCREEN
@@ -1148,7 +1198,7 @@ while running:
                             current_screen_state = EXAM_PREP_SCREEN
                         else:
                             current_screen_state = MIDTERM_RESULTS_SCREEN
-                    elif week_count > 17:
+                    elif week_count > 20:   # after finals (raw 18-20) are fully done
                         # Semester is over — generate finals if not already done and go to results
                         for c in course_manager.courses:
                             if c.course_type == "Theory" and c.final_mark is None:
@@ -1312,6 +1362,9 @@ while running:
                             break
                     messages = messages[-5:]
 
+            elif sick_quiz_interrupt_box.active:
+                sick_quiz_interrupt_box.handle_event(event)
+
             elif not class_interrupt_box.active and not lab_assessment_interrupt_box.active:
                 # Open the input prompt for actions that need hours
                 remaining_hours = DAY_END - time_of_day
@@ -1362,6 +1415,7 @@ while running:
                     and not quiz_result_box.active
                     and not alert_box.active
                     and not input_box.active
+                    and not sick_quiz_interrupt_box.active
                     and day_in_week <= 5
                     and week_count not in MIDTERM_EXAM_WEEKS
                     and week_count not in FINAL_EXAM_WEEKS):  # no quizzes during exam period
@@ -1396,8 +1450,9 @@ while running:
 
                         if student.is_sick:
                             quiz["missed"] = True
-                            # mark stays None — result system will handle this in Phase 2
-                            messages.append(f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} MISSED (sick).")
+                            # Show sick-miss interrupt instead of a silent message
+                            sick_quiz_interrupt_box.open(
+                                course, f"Quiz {quiz['quiz_number']}")
                         else:
                             mark = course.generate_quiz_mark(week_count, student.stress, student.sleep, student.health)
                             quiz["mark"] = mark
@@ -1414,6 +1469,7 @@ while running:
                     and not lab_assessment_interrupt_box.active
                     and not alert_box.active
                     and not input_box.active
+                    and not sick_quiz_interrupt_box.active
                     and day_in_week <= 5
                     and week_count not in MIDTERM_EXAM_WEEKS
                     and week_count not in FINAL_EXAM_WEEKS):
@@ -1446,9 +1502,9 @@ while running:
 
                         if student.is_sick:
                             la["missed"] = True
-                            messages.append(
-                                f"[LAB] {course.name} — "
-                                f"{la['assessment_type'].replace('_', ' ').title()} MISSED (sick).")
+                            # Show sick-miss interrupt instead of a silent message
+                            atype_label = la['assessment_type'].replace('_', ' ').title()
+                            sick_quiz_interrupt_box.open(course, atype_label)
                         else:
                             lab_assessment_interrupt_box.open(course, la["assessment_type"])
 
@@ -1466,7 +1522,7 @@ while running:
                     if runner and runner.pending_lab_assessment:
                         la, course = runner.pending_lab_assessment
                         la["taken"] = True
-                        if choice == "skip" or runner.student.is_sick:
+                        if choice == "skip":
                             la["missed"] = True
                             atype = la["assessment_type"].replace("_", " ").title()
                             msg = f"[LAB] {course.name} — {atype} SKIPPED."
@@ -1483,6 +1539,10 @@ while running:
                         messages = runner.last_msgs()
                         runner.pending_lab_assessment = None
 
+            # Sick quiz/lab interrupt (replay and live) — dismiss and continue
+            elif sick_quiz_interrupt_box.active:
+                sick_quiz_interrupt_box.handle_event(event)
+
             # Quiz interrupt (replay) — highest priority
             elif quiz_interrupt_box.active:
                 choice = quiz_interrupt_box.handle_event(event)
@@ -1493,7 +1553,7 @@ while running:
                     if runner and runner.pending_quiz:
                         quiz, course = runner.pending_quiz
                         quiz["taken"] = True
-                        if choice == "skip" or runner.student.is_sick:
+                        if choice == "skip":
                             quiz["missed"] = True
                             msg = f"[QUIZ] {course.name} — Quiz {quiz['quiz_number']} SKIPPED."
                         else:
@@ -1550,7 +1610,7 @@ while running:
                     class_interrupt_box.attend_all = False
                     new_diy = ((day_count - 1) % 7) + 1
                     new_wk  = ((day_count - 1) // 7) + 1
-                    _disp_wk = new_wk if new_wk <= 7 else (new_wk - 2 if new_wk >= 10 else new_wk)
+                    _disp_wk = _raw_to_display_week(new_wk)
                     messages = [f"Week {_disp_wk} begins — playing manually!"]
                     print(f"\n--- Week {_disp_wk} - {day_name(new_diy)} (Day {day_count}) [Manual] ---")
                     current_screen_state = GAME_SCREEN
@@ -1559,7 +1619,7 @@ while running:
                     week_replay_runner.quiz_week_pending = False
                     week_replay_runner._start_new_day()
                     _cur_wk = week_replay_runner.current_week
-                    _disp_wk = _cur_wk if _cur_wk <= 7 else (_cur_wk - 2 if _cur_wk >= 10 else _cur_wk)
+                    _disp_wk = _raw_to_display_week(_cur_wk)
                     messages = [f"Week {_disp_wk} replay continues..."]
 
             elif week_repeat_box.active:
@@ -1579,13 +1639,13 @@ while running:
                     if assessments:
                         week_replay_runner.quiz_week_pending = True
                         _cur_wk = week_replay_runner.current_week
-                        _disp_wk = _cur_wk if _cur_wk <= 7 else (_cur_wk - 2 if _cur_wk >= 10 else _cur_wk)
+                        _disp_wk = _raw_to_display_week(_cur_wk)
                         week_replay_runner.msgs.append(f"Week {_disp_wk} begins but has assessments scheduled.")
                         quiz_week_prompt_box.open(_disp_wk, assessments)
                     else:
                         week_replay_runner._start_new_day()
                         _cur_wk = week_replay_runner.current_week
-                        _disp_wk = _cur_wk if _cur_wk <= 7 else (_cur_wk - 2 if _cur_wk >= 10 else _cur_wk)
+                        _disp_wk = _raw_to_display_week(_cur_wk)
                         week_replay_runner.msgs.append(f"Week {_disp_wk} begins (fast-forward).")
                     messages = []
 
@@ -1648,7 +1708,7 @@ while running:
                     daily_outages = wifi_failure_event()
                     new_diy = ((day_count - 1) % 7) + 1
                     new_wk  = ((day_count - 1) // 7) + 1
-                    _disp_wk = new_wk if new_wk <= 7 else (new_wk - 2 if new_wk >= 10 else new_wk)
+                    _disp_wk = _raw_to_display_week(new_wk)
                     messages = [f"Week {_disp_wk} - {day_name(new_diy)} begins!"]
                     print(f"\n--- Week {_disp_wk} - {day_name(new_diy)} (Day {day_count}) ---")
                     print(f"Time of day: {format_time(time_of_day)}")
@@ -1660,7 +1720,9 @@ while running:
                     class_interrupt_box.attend_all = False
                     # --- Semester milestone check (boundary-crossing) ---
                     _start_midterm = (week_count < 8 and ((new_wk == 7 and new_diy >= 6) or new_wk >= 8))
-                    _start_final   = (week_count < 18 and ((new_wk == 17 and new_diy >= 6) or new_wk >= 18))
+                    # Finals begin after the 8 post-mid class weeks end (raw 10-17);
+                    # trigger on Saturday of raw week 17 or when we cross into raw week 18.
+                    _start_final   = (week_count < 18 and ((new_wk == 18 and new_diy >= 6) or new_wk >= 18))
                     
                     if _start_midterm and _exam_period_type == "":    # crossed into mid-exam setup
                         course_manager.generate_midterm_schedule()
@@ -1847,7 +1909,8 @@ while running:
         elif current_screen_state == MIDTERM_RESULTS_SCREEN:
             if exam_continue_btn.clicked(event):
                 # Clear exam period state so day-detection and exam-label logic don't re-fire
-                day_count   = 64       # Day 64 = Week 10 Monday (after weeks 8-9 exams)
+                _week10_monday = 64
+                day_count   = max(day_count + 1, _week10_monday)
                 time_of_day = 8.0
                 day_over    = False
                 current_game_bg = bg_map['default']
@@ -1879,7 +1942,7 @@ while running:
                 week_replay_runner = WeekReplayRunner(
                     student, course_manager,
                     _style,
-                    n_weeks=6,        # weeks 10, 11, 12, 13, 14, 15
+                    n_weeks=6,        # raw weeks 10-15; weeks 16-17 played manually
                     start_day=63,
                     start_week=9
                 )
@@ -1889,7 +1952,7 @@ while running:
                 # Check if week 10 has assessments before starting
                 assessments = week_replay_runner.get_next_week_assessments()
                 _raw_wk  = week_replay_runner.current_week
-                _disp_wk = _raw_wk if _raw_wk <= 7 else (_raw_wk - 2 if _raw_wk >= 10 else _raw_wk)
+                _disp_wk = _raw_to_display_week(_raw_wk)
                 if assessments:
                     week_replay_runner.quiz_week_pending = True
                     week_replay_runner.msgs.append(
@@ -1948,15 +2011,31 @@ while running:
             and not repeat_box.active
             and not week_repeat_box.active
             and not quiz_interrupt_box.active
-            and not lab_assessment_interrupt_box.active):
+            and not lab_assessment_interrupt_box.active
+            and not sick_quiz_interrupt_box.active):
         # Open interrupt box if runner is sitting on a pending quiz
         if replay_runner.pending_quiz:
             quiz, course = replay_runner.pending_quiz
-            quiz_interrupt_box.open(course, quiz["quiz_number"])
+            if replay_runner.student.is_sick:
+                # Auto-resolve as missed and show sick notice
+                quiz["taken"] = True
+                quiz["missed"] = True
+                replay_runner.pending_quiz = None
+                sick_quiz_interrupt_box.open(course, f"Quiz {quiz['quiz_number']}")
+            else:
+                quiz_interrupt_box.open(course, quiz["quiz_number"])
         # Open lab interrupt box if runner is sitting on a pending lab assessment
         elif replay_runner.pending_lab_assessment:
             la, course = replay_runner.pending_lab_assessment
-            lab_assessment_interrupt_box.open(course, la["assessment_type"])
+            if replay_runner.student.is_sick:
+                # Auto-resolve as missed and show sick notice
+                la["taken"] = True
+                la["missed"] = True
+                replay_runner.pending_lab_assessment = None
+                atype_label = la["assessment_type"].replace("_", " ").title()
+                sick_quiz_interrupt_box.open(course, atype_label)
+            else:
+                lab_assessment_interrupt_box.open(course, la["assessment_type"])
         else:
             prev_day = replay_runner.current_day
             step_msgs, alert_info = replay_runner.tick()
@@ -1999,15 +2078,31 @@ while running:
             and not repeat_box.active
             and not week_repeat_box.active
             and not quiz_interrupt_box.active
-            and not lab_assessment_interrupt_box.active):
+            and not lab_assessment_interrupt_box.active
+            and not sick_quiz_interrupt_box.active):
         # Open interrupt box if runner is sitting on a pending quiz
         if week_replay_runner.pending_quiz:
             quiz, course = week_replay_runner.pending_quiz
-            quiz_interrupt_box.open(course, quiz["quiz_number"])
+            if week_replay_runner.student.is_sick:
+                # Auto-resolve as missed and show sick notice
+                quiz["taken"] = True
+                quiz["missed"] = True
+                week_replay_runner.pending_quiz = None
+                sick_quiz_interrupt_box.open(course, f"Quiz {quiz['quiz_number']}")
+            else:
+                quiz_interrupt_box.open(course, quiz["quiz_number"])
         # Open lab interrupt box if runner is sitting on a pending lab assessment
         elif week_replay_runner.pending_lab_assessment:
             la, course = week_replay_runner.pending_lab_assessment
-            lab_assessment_interrupt_box.open(course, la["assessment_type"])
+            if week_replay_runner.student.is_sick:
+                # Auto-resolve as missed and show sick notice
+                la["taken"] = True
+                la["missed"] = True
+                week_replay_runner.pending_lab_assessment = None
+                atype_label = la["assessment_type"].replace("_", " ").title()
+                sick_quiz_interrupt_box.open(course, atype_label)
+            else:
+                lab_assessment_interrupt_box.open(course, la["assessment_type"])
         else:
             step_msgs, alert_info = week_replay_runner.tick()
             if alert_info:
@@ -2212,6 +2307,7 @@ while running:
         quiz_result_box.draw(screen)
         lab_assessment_interrupt_box.draw(screen)
         lab_assessment_result_box.draw(screen)
+        sick_quiz_interrupt_box.draw(screen)   # sick-miss notice (topmost on GAME_SCREEN)
 
     elif current_screen_state == DAY_END_SCREEN:
         avg_k = course_manager.get_average_knowledge()
@@ -2243,8 +2339,9 @@ while running:
         academic_dashboard.draw(screen, course_manager, week_count)
         stats_dashboard.draw(screen, student, day_count)
         quiz_week_prompt_box.draw(screen)
-        quiz_interrupt_box.draw(screen)   # replay quiz Take/Skip prompt
+        quiz_interrupt_box.draw(screen)          # replay quiz Take/Skip prompt
         lab_assessment_interrupt_box.draw(screen)  # replay lab Take/Skip prompt
+        sick_quiz_interrupt_box.draw(screen)       # sick-miss notice (topmost on DAY_END_SCREEN)
 
     elif current_screen_state == EXAM_SCREEN:
         exam_screen(screen, _exam_period_type, exam_continue_btn, message_font,

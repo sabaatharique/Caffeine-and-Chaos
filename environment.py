@@ -12,8 +12,9 @@ DAYS_OF_WEEK = [ "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 MIDTERM_EXAM_WEEKS = [8, 9]
 MIDTERM_EXAM_DAYS = [0, 2, 4]   # Mon, Wed, Fri (0-indexed)
 
-# Final exam window: weeks 16–18, days Tue/Fri only (day_idx 1, 3)
-FINAL_EXAM_WEEKS = [16, 17, 18]
+# Final exam window: weeks 18–20, days Tue/Fri only (day_idx 1, 3)
+# Raw timeline: 1-7 pre-mid, 8-9 midterms, 10-17 post-mid (display 8-15), 18-20 finals
+FINAL_EXAM_WEEKS = [18, 19, 20]
 FINAL_EXAM_DAYS = [1, 3]      # Tue, Fri (0-indexed)
 
 # Index 4 is the lunch slot (no classes)
