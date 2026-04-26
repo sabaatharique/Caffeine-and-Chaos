@@ -388,13 +388,13 @@ def post_mid_choice_screen(screen, repeat_btn, manual_btn, font):
 
     # Body lines
     lines = [
-        "Midterms are done. What's your plan for the rest of the semester?",
+        "  Midterms are done. What's your plan for the rest of the semester?",
         "",
-        "  Repeat Pre-Mid Style  →  automatically replays your pre-mid week",
+        "  Repeat Pre-Mid Style  -  automatically replays your pre-mid week",
         "  pattern (actions, hours, courses) for all remaining class weeks.",
         "  Quizzes and labs will still interrupt for you to decide.",
         "",
-        "  Play Manually  →  you control every day as usual.",
+        "  Play Manually  -  you control every day as usual.",
     ]
     body_font = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
     y = card_y + 74
