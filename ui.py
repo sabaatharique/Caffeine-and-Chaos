@@ -2629,12 +2629,12 @@ class StatsDashboard:
             if abs(delta) < 1.0:
                 return "-", f"{delta:+.0f}", self._C_DIM
             if higher_is_better:
-                arrow = "^" if delta > 0 else "v"
+                #arrow = "^" if delta > 0 else "v"
                 color = self._C_GOOD if delta > 0 else self._C_BAD
             else:
-                arrow = "^" if delta > 0 else "v"
+                #arrow = "^" if delta > 0 else "v"
                 color = self._C_BAD if delta > 0 else self._C_GOOD
-            return arrow, f"{delta:+.0f}", color
+            return "", f"{delta:+.0f}", color
 
         # Stress / Health / Motivation trends 
         for label, snap, higher_good in [

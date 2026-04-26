@@ -615,8 +615,9 @@ class CourseManager:
 
     def schedule_all_lab_assessments(self):
         """
-        Assign 1 lab-mid (week 6 or 7) + 1 lab-final (week 14 or 15) to every
-        lab course.  Call this ONCE after apply_schedule().
+        Assign 1 lab-mid (raw week 6 or 7, before midterm exams) +
+        1 lab-final (raw week 14 or 15, display week 12-13, before finals) to
+        every lab course.  Call this ONCE after apply_schedule().
         """
         import events
 

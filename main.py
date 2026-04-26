@@ -146,7 +146,7 @@ class ReplayRunner:
             
             _diw = ((self.current_day - 1) % 7) + 1
             _week = ((self.current_day - 1) // 7) + 1
-            if _week in (7, 15) and _diw == 5:
+            if _week in (7, 17) and _diw == 5:
                 self.done = True
                 stop_msg = f"Friday of Week {_week} done — stopping replay for weekend exam prep."
                 self.msgs.append(stop_msg)
@@ -470,9 +470,9 @@ class WeekReplayRunner:
             self.day_in_week += 1
 
             # Stop after completing Friday (day 5) of the last pre-exam week
-            # (week 7 = last week before midterm; week 15 = last week before finals)
+            # (raw week 7 = last week before midterm; raw week 17 = last week before finals)
             _completed_week = self.current_week
-            _is_last_pre_exam = (_completed_week in (7, 15))
+            _is_last_pre_exam = (_completed_week in (7, 17))
             _finished_friday = (self.day_in_week == 5)
             if _is_last_pre_exam and _finished_friday:
                 # Stop cleanly to let player play weekend manually
@@ -661,10 +661,12 @@ _exam_prep_replay_runner = None    # ExamPrepReplayRunner instance
 
 
 def get_semester_phase(wk: int) -> str:
-    """Return the current semester phase based on week number."""
+    """Return the current semester phase based on raw week number.
+    Raw timeline: 1-7 pre-mid, 8-9 midterm exams, 10-17 post-mid, 18-20 final exams.
+    """
     if wk <= 7:
         return "pre_mid"
-    elif wk <= 15:
+    elif wk <= 17:
         return "post_mid"
     else:
         return "done"
@@ -676,7 +678,7 @@ def _max_week_repeats(wk: int) -> int:
     if phase == "pre_mid":
         return max(0, 7 - wk)
     elif phase == "post_mid":
-        return max(0, 15 - wk)
+        return max(0, 17 - wk)
     return 0
 
 # Assets
@@ -1016,7 +1018,7 @@ while running:
 
     # Phase-start flow constraints
     _in_exam_period = _exam_period_type in ("mid", "final")
-    if week_count in (1, 8) and day_in_week == 7 and not _in_exam_period:  # Sunday of phase week 1
+    if week_count in (1, 10) and day_in_week == 7 and not _in_exam_period:  # Sunday of phase week 1
         repeat_btn.enabled = False
     elif _in_exam_period and _exam_idx < len(_exam_schedule):
         # Allow repeat only if there are prep days left before next exam
@@ -1146,7 +1148,7 @@ while running:
                             current_screen_state = EXAM_PREP_SCREEN
                         else:
                             current_screen_state = MIDTERM_RESULTS_SCREEN
-                    elif week_count > 15:
+                    elif week_count > 17:
                         # Semester is over — generate finals if not already done and go to results
                         for c in course_manager.courses:
                             if c.course_type == "Theory" and c.final_mark is None:
@@ -1658,7 +1660,7 @@ while running:
                     class_interrupt_box.attend_all = False
                     # --- Semester milestone check (boundary-crossing) ---
                     _start_midterm = (week_count < 8 and ((new_wk == 7 and new_diy >= 6) or new_wk >= 8))
-                    _start_final   = (week_count < 16 and ((new_wk == 15 and new_diy >= 6) or new_wk >= 16))
+                    _start_final   = (week_count < 18 and ((new_wk == 17 and new_diy >= 6) or new_wk >= 18))
                     
                     if _start_midterm and _exam_period_type == "":    # crossed into mid-exam setup
                         course_manager.generate_midterm_schedule()
@@ -2033,22 +2035,24 @@ while running:
     # Active ExamPrepReplayRunner tick (DAY_END_SCREEN during exam period)
     if (current_screen_state == DAY_END_SCREEN
             and _exam_prep_replay_runner is not None
-            and not _exam_prep_replay_runner.done
             and not alert_box.active):
-        step_msgs, alert_info = _exam_prep_replay_runner.tick()
-        if alert_info:
-            alert_box.open(*alert_info)
-        messages = _exam_prep_replay_runner.last_msgs()
-        day_count = _exam_prep_replay_runner.current_day
-        time_of_day = _exam_prep_replay_runner.time_cursor
-        sick_active = student.is_sick
-        if _exam_prep_replay_runner.done:
-            # Runner paused on exam day — switch to taking screen
+        if not _exam_prep_replay_runner.done:
+            step_msgs, alert_info = _exam_prep_replay_runner.tick()
+            if alert_info:
+                alert_box.open(*alert_info)
+            messages = _exam_prep_replay_runner.last_msgs()
+            day_count = _exam_prep_replay_runner.current_day
+            time_of_day = _exam_prep_replay_runner.time_cursor
+            sick_active = student.is_sick
+        # Runner reached exam day — only switch once any sickness/recovery alert
+        # has been dismissed (alert_box was just opened above so this defers one frame).
+        if _exam_prep_replay_runner.done and not alert_box.active:
             _exam_prep_replay_runner = None
             current_screen_state = EXAM_TAKING_SCREEN
 
     # Exam-day detection (GAME_SCREEN → EXAM_TAKING_SCREEN)
     if (current_screen_state == GAME_SCREEN
+            and not alert_box.active
             and _exam_period_type in ("mid", "final")
             and _exam_idx < len(_exam_schedule)):
         _entry = _exam_schedule[_exam_idx]

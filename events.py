@@ -68,8 +68,8 @@ def generate_quiz_schedule(weekly_slots, used_slots):
     Assign 2 pre-midterm + 2 post-midterm quiz dates.
     Returns a list of quiz dicts.
     """
-    pre_mid_weights  = [1, 1, 2, 4, 5, 5, 4]     # weeks 1-7
-    post_mid_weights = [1, 1, 2, 4, 5, 5, 4, 3]  # weeks 8-15
+    pre_mid_weights  = [1, 1, 2, 4, 5, 5, 4]     # weeks 1-7 (raw == display)
+    post_mid_weights = [1, 1, 2, 4, 5, 5, 4, 3]  # weeks 10-17 (raw; display 8-15)
     scheduled_quizzes = []
     next_quiz_num = 1
 
@@ -93,15 +93,15 @@ def generate_quiz_schedule(weekly_slots, used_slots):
                 }
         return None
 
-    # 2 quizzes before mid (weeks 1-7)
+    # 2 quizzes before mid (weeks 1-7, raw == display)
     pre_weeks = list(range(1, 8))
     for _ in range(2):
         q = _pick(pre_weeks, pre_mid_weights)
         if q:
             scheduled_quizzes.append(q)
 
-    # 2 quizzes after mid (weeks 8-15)
-    post_weeks = list(range(8, 16))
+    # 2 quizzes after mid (raw weeks 10-17, displayed as 8-15)
+    post_weeks = list(range(10, 18))
     for _ in range(2):
         q = _pick(post_weeks, post_mid_weights)
         if q:
@@ -121,8 +121,10 @@ def generate_lab_assessment_schedule(weekly_slots):
     Returns a list of two assessment dicts.
     """
     # Weighted: slightly prefer the later week in each window (harder to be early)
+    # lab-mid: raw weeks 6-7 (same as display; before midterm exams at raw 8-9)
     mid_weeks    = [6, 7]
     mid_weights  = [4, 6]
+    # lab-final: raw weeks 14-15 (display 12-13; safely before finals at raw 16-18)
     final_weeks  = [14, 15]
     final_weights = [4, 6]
 
