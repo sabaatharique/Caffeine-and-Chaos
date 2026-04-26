@@ -504,7 +504,7 @@ class Student:
 
     def burnout_check(self):
         # Return true if burnout occurs
-        return self.consecutive_stress_days >= 5
+        return self.consecutive_stress_days >= 5 and not self.is_sick
 
     def trigger_burnout(self):
         # self.knowledge -= 5  # No longer global knowledge

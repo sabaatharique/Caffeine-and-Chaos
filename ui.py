@@ -1,4 +1,5 @@
 import pygame
+import math
 
 
 class StatusBar:
@@ -2272,7 +2273,12 @@ class AcademicDashboard:
         else:
             for q in history:
                 mark = 0 if q["missed"] else q.get("mark", None)
-                mark_str = f" ({mark:.0f}%)" if isinstance(mark, (int, float)) else " (N/A)"
+                if isinstance(mark, (int, float)):
+                    max_mark = 5 * q.get("credits", 3)
+                    abs_mark = math.floor((mark / 100) * max_mark * 2) / 2
+                    mark_str = f" ({abs_mark:.1f}/{max_mark})"
+                else:
+                    mark_str = " (N/A)"
                 status = f"MISSED{mark_str}" if q["missed"] else f"TAKEN{mark_str}"
                 st_color = (255, 120, 120) if q["missed"] else (120, 255, 180)
                 
@@ -2431,7 +2437,7 @@ class AcademicDashboard:
             if course.course_type != "Theory": continue
             for q in course.scheduled_quizzes:
                 if q["taken"]:
-                    res.append({**q, "course_name": course.name})
+                    res.append({**q, "course_name": course.name, "credits": course.credits})
         # Sort by week (descending) then quiz number
         res.sort(key=lambda x: (x["week"], x["quiz_number"]), reverse=True)
         return res

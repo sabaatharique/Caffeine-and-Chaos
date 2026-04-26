@@ -1,5 +1,9 @@
 import random
+import math
 
+def floor_half(x: float) -> float:
+    """Floor x to the nearest 0.5"""
+    return math.floor(x * 2) / 2
 class Course:
     def __init__(self, name, credits, course_type="Theory", max_lab_evaluations=0,
                  total_classes=0, schedule="weekly"):
@@ -127,7 +131,8 @@ class Course:
             0.25 * stress
         )
 
-        mark = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        mark = floor_half(raw)
         return mark
 
 
@@ -151,7 +156,8 @@ class Course:
             0.2 * stress
         )
 
-        self.mid_mark = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        self.mid_mark = floor_half(raw)
         return self.mid_mark
 
 
@@ -175,7 +181,8 @@ class Course:
             0.2 * stress
         )
 
-        self.final_mark = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        self.final_mark = floor_half(raw)
         return self.final_mark
 
     # LAB SECTION
@@ -198,7 +205,8 @@ class Course:
             0.3 * stress
         )
 
-        mark = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        mark = floor_half(raw)
         self.lab_evaluations.append(mark)
         return mark
 
@@ -226,7 +234,8 @@ class Course:
             0.2 * stress
         )
 
-        self.lab_mid = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        self.lab_mid = floor_half(raw)
         return self.lab_mid
 
     def generate_lab_final(self, week, stress=0, health=100, is_sick=False):
@@ -253,7 +262,8 @@ class Course:
             0.2 * stress
         )
 
-        self.lab_final = max(0, min(100, base + randomness))
+        raw = max(0.0, min(100.0, base + randomness))
+        self.lab_final = floor_half(raw)
         return self.lab_final
 
     def calculate_total_marks(self):

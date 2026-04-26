@@ -1,4 +1,5 @@
 import pygame
+import math
 from environment import day_name
 
 
@@ -221,15 +222,20 @@ def _draw_course_card(screen, course, card_x, card_y, card_w,
             parts = []
             for q in sorted(course.scheduled_quizzes, key=lambda q: q["quiz_number"]):
                 if q["taken"] and not q["missed"] and q["mark"] is not None:
-                    parts.append(f"Q{q['quiz_number']}: {q['mark'] / 100 * max_mark:.1f}/{max_mark}")
+                    abs_mark = math.floor(q['mark'] / 100 * max_mark * 2) / 2
+                    parts.append(f"Q{q['quiz_number']}: {abs_mark:.1f}/{max_mark}")
                 else:
-                    parts.append(f"Q{q['quiz_number']}: 0/{max_mark}")
+                    parts.append(f"Q{q['quiz_number']}: 0.0/{max_mark}")
             marks_str = "  ".join(parts)
             rows.append(("Quizzes:", marks_str, None))
         if course.mid_mark is not None:
-            rows.append(("Midterm:", f"{course.mid_mark:.1f}%", None))
+            mid_max = 25 * course.credits
+            mid_abs = math.floor(course.mid_mark / 100 * mid_max * 2) / 2
+            rows.append(("Midterm:", f"{mid_abs:.1f}/{mid_max}", None))
         if show_final and course.final_mark is not None:
-            rows.append(("Final Exam:", f"{course.final_mark:.1f}%", None))
+            fin_max = 50 * course.credits
+            fin_abs = math.floor(course.final_mark / 100 * fin_max * 2) / 2
+            rows.append(("Final Exam:", f"{fin_abs:.1f}/{fin_max}", None))
     elif course.course_type == "Lab":
         if course.lab_evaluations:
             evals_str = "  ".join(f"E{i+1}: {m:.0f}%" for i, m in enumerate(course.lab_evaluations))
@@ -1023,7 +1029,8 @@ def compute_optimal_path(student, course_manager) -> dict:
             "actual_knowledge": actual_k,
             "gap_knowledge": gap_k,
             "optimal_hours": optimal_hours,
-            "attendance_blocked": not c.is_attendance_eligible()
+            "attendance_blocked": not c.is_attendance_eligible(),
+            "expected_knowledge": expected_knowledge
         })
         
         total_optimal_study += optimal_hours
@@ -1127,9 +1134,13 @@ def semester_optimal_screen(screen, optimal_data, prev_btn, quit_btn, scroll_y=0
         ak = c["actual_knowledge"]
         gk = c["gap_knowledge"]
         oh = c["optimal_hours"]
+        ek = c.get("expected_knowledge", 100.0)
         
-        str1 = f"Knowledge to hit target: {rk:.1f}%    Actual: {ak:.1f}%    Gap: {gk:+.1f}%"
-        s1 = label_font.render(str1, True, (200, 200, 200))
+        is_impossible = rk > (ek + 0.1)
+        rk_str = f"{rk:.1f}% (Lifestyle Penalty)" if is_impossible else f"{rk:.1f}%"
+        
+        str1 = f"Knowledge to hit target: {rk_str}  Actual: {ak:.1f}%  Gap: {gk:+.1f}%"
+        s1 = label_font.render(str1, True, (255, 150, 150) if is_impossible else (200, 200, 200))
         screen.blit(s1, (cx + CARD_PAD, cy + 45))
         
         str2 = f"Optimal Study Time Required: {oh:.1f} hrs (Total this Semester)"
