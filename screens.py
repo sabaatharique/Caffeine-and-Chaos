@@ -221,6 +221,8 @@ def _draw_course_card(screen, course, card_x, card_y, card_w,
             max_mark = 5 * course.credits
             parts = []
             for q in sorted(course.scheduled_quizzes, key=lambda q: q["quiz_number"]):
+                if not show_final and q["quiz_number"] > 2:
+                    continue
                 if q["taken"] and not q["missed"] and q["mark"] is not None:
                     abs_mark = math.floor(q['mark'] / 100 * max_mark * 2) / 2
                     parts.append(f"Q{q['quiz_number']}: {abs_mark:.1f}/{max_mark}")
@@ -706,7 +708,7 @@ def exam_screen(screen, exam_type, continue_btn, font, course_manager=None):
         for c in blocked_courses:
             att = c.get_attendance_percentage()
             w_surf = warn_font.render(
-                f"BARRED: {c.name}  ({att:.0f}% < 85%) — will score 0", True, (255, 90, 70))
+                f"BARRED: {c.name}  ({att:.0f}% < 85%) - will score 0", True, (255, 90, 70))
             screen.blit(w_surf, (WIDTH // 2 - w_surf.get_width() // 2, warn_y))
             warn_y += w_surf.get_height() + 3
         hint_surf = warn_font.render("Barred courses automatically score 0.", True, (130, 130, 170))
