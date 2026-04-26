@@ -48,7 +48,7 @@ def game_screen(screen, background_image, student, bars, buttons,
 
     # Draw Message Box Background
     if messages:
-        msg_box_x = bar_margin
+        msg_box_x = 50
         msg_box_y = 380
 
         y_offset = msg_box_y + 10
@@ -63,7 +63,7 @@ def game_screen(screen, background_image, student, bars, buttons,
             else:
                 msg_color = (255, 255, 0)      # default yellow
             msg_surface = message_font.render(msg, True, msg_color)
-            screen.blit(msg_surface, (msg_box_x + 10, y_offset))
+            screen.blit(msg_surface, (msg_box_x, y_offset))
             y_offset += 30
 
     # bars[0] (Knowledge) is drawn separately in main.py to show average

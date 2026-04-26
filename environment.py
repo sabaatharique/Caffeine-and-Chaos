@@ -91,17 +91,12 @@ def draw_clock(screen, clock_font, date_font, time_of_day: float,
         week_color = clock_color
     week_surf  = date_font.render(week_label_str, True, week_color)
 
-    box_w = max(time_surf.get_width(),
-                week_surf.get_width()) + 20
-    box_h = (time_surf.get_height()
-             + week_surf.get_height() + 5)
-    box_x = WIDTH - bar_space - box_w
-    box_y = 95
-
+    right_edge = WIDTH - 50
+    
     y = 120
-    screen.blit(time_surf, (box_x + box_w - time_surf.get_width() - 10, y))
+    screen.blit(time_surf, (right_edge - time_surf.get_width(), y))
     y += time_surf.get_height() - 10
-    screen.blit(week_surf, (box_x + box_w - week_surf.get_width() - 10, y))
+    screen.blit(week_surf, (right_edge - week_surf.get_width(), y))
 
 
 def outage_overlap(outages: list, t_start: float, t_end: float) -> float:
