@@ -375,7 +375,7 @@ class Course:
         if pct >= 50:  return "C+"
         if pct >= 45:  return "C"
         if pct >= 40:  return "D"
-        return "F"
+        return "Referred"
 
     @staticmethod
     def required_knowledge_for_pct(target_pct, sleep, health, stress, expected_knowledge, course_type="Theory"):
