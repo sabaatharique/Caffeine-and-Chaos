@@ -7,12 +7,12 @@ from events import wifi_failure_event
 from environment import DAY_START, DAY_END, format_time, draw_clock, outage_overlap, day_name, get_todays_classes
 from ui import (StatusBar, Button, InputBox, NumberBox, AlertBox,
                 SetupWizard, ScheduleBuilder, ClassInterruptBox,
-                QuizResultBox, AcademicDashboard, QuizWeekPromptBox,
+                QuizResultBox, AcademicDashboard, StatsDashboard, QuizWeekPromptBox,
                 QuizInterruptBox, LabAssessmentInterruptBox, LabAssessmentResultBox,
                 Checkbox)
 from screens import (main_menu, game_screen, day_end_screen, save_prompt_screen,
                      exam_screen, midterm_results_screen, semester_end_screen,
-                     semester_stats_screen,
+                     semester_stats_screen, post_mid_choice_screen,
                      exam_schedule_screen, exam_prep_screen,
                      exam_taking_screen)
 from environment import MIDTERM_EXAM_WEEKS, FINAL_EXAM_WEEKS
@@ -38,6 +38,7 @@ sick_active    = False   # True while student is sick
 week_count = 1 # current week number (starts at 1)
 day_in_week = 1 # day within the current week (1-7)
 week_actions: list[list] = [] # accumulated per-day action lists for current week
+_pre_mid_week_template: list[list] = [] # snapshots of weeks 1-7 (Feature 1)
 _current_day_actions_snapshot: list = [] # snapshot of day_actions at week-day start
 
 print(f"Time of day: {format_time(time_of_day)}")
@@ -332,6 +333,7 @@ class WeekReplayRunner:
 
         self._day_outages = wifi_failure_event()
         self._outage_idx  = 0
+        self.last_completed_week = start_week  # updated whenever a week finishes
 
         # Rewind quiz taken/missed flags for every week we're about to fast-forward
         for w in range(start_week + 1, start_week + n_weeks + 1):
@@ -406,6 +408,7 @@ class WeekReplayRunner:
         # All days in this week done?
         if self.day_in_week >= len(self.week_actions):
             completed_week = self.current_week
+            self.last_completed_week = completed_week
             self._start_new_week()   # bumps weeks_done, current_week; does NOT touch current_day
             if self.weeks_done >= self.total_weeks:
                 self.done = True
@@ -458,16 +461,16 @@ class WeekReplayRunner:
 
             self.day_in_week += 1
 
-            # Stop after Friday of the last class week before each exam period
-            # (week 7 = Friday before midterm; week 15 = Friday before finals)
-            _completed_diw  = self.day_in_week   # now 1-based after increment … hmm
+            # Stop after completing the 7th day (Sunday) of the last pre-exam week
+            # (week 7 = last week before midterm; week 15 = last week before finals)
             _completed_week = self.current_week
             _is_last_pre_exam = (_completed_week in (7, 15))
-            _finished_friday  = (self.day_in_week == 5)  # 5th day of week = Friday
-            if _is_last_pre_exam and _finished_friday:
+            _finished_all_days = (self.day_in_week >= len(self.week_actions))  # done with this week
+            if _is_last_pre_exam and _finished_all_days:
                 # Stop cleanly — main loop will trigger exam schedule flow
+                self.last_completed_week = _completed_week
                 self.done = True
-                stop_msg = (f"Week {_completed_week} Friday done — stopping replay before exam period.")
+                stop_msg = (f"Week {_completed_week} done — stopping replay before exam period.")
                 self.msgs.append(stop_msg)
                 return day_msgs + [stop_msg], alert_info
 
@@ -629,6 +632,7 @@ EXAM_TAKING_SCREEN = "exam_taking_screen"
 MIDTERM_RESULTS_SCREEN = "midterm_results_screen"
 SEMESTER_END_SCREEN = "semester_end_screen"
 SAVE_PROMPT = "save_prompt"
+POST_MID_CHOICE_SCREEN = "post_mid_choice_screen"
 current_screen_state = MAIN_MENU
 
 # Scroll state for results pages
@@ -708,6 +712,11 @@ academic_dashboard = AcademicDashboard(
     message_font,
     message_font,
 )
+stats_dashboard = StatsDashboard(
+    WIDTH, HEIGHT,
+    message_font,
+    message_font,
+)
 
 pending_action: str | None = None
 
@@ -738,10 +747,8 @@ sleep_btn = Button(btn_space*2 + btn_w, HEIGHT - 80, btn_w, btn_h, "Sleep", butt
 relax_btn = Button(btn_space*3 + btn_w*2, HEIGHT - 80, btn_w, btn_h, "Relax", button_font)
 drink_coffee_btn = Button(btn_space*4 + btn_w*3, HEIGHT - 80, btn_w, btn_h, "Coffee", button_font)
 eat_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 80, btn_w, btn_h, "Food", button_font)
-stats_btn = Button(btn_space*5 + btn_w*4, HEIGHT - 440, btn_w, btn_h, "Course Panel", button_font)
-
 dashboard_btn = None   # Removed as it's now persistent
-game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn, stats_btn]
+game_buttons = [study_btn, sleep_btn, relax_btn, drink_coffee_btn, eat_btn]
 
 # Day-end buttons  (4 buttons: Continue | Repeat Day | Repeat Week | Quit)
 _btn_y = HEIGHT // 2 + 50
@@ -759,6 +766,10 @@ skip_exam_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 160, 120, 40, "Skip (0)", 
 sem_quit_btn = Button(WIDTH // 2 - 60, HEIGHT // 2 + 120, 120, 40, "Quit",     button_font)
 sem_next_btn = Button(840, HEIGHT - 50, 100, 36, "Stats >",   button_font)
 sem_prev_btn = Button( 60, HEIGHT - 50, 100, 36, "< Results", button_font)
+
+# Post-Mid Choice buttons (Feature 1)
+post_mid_repeat_btn = Button(WIDTH // 2 - 190, HEIGHT // 2 + 60, 180, 45, "Repeat Lifestyle", button_font)
+post_mid_manual_btn = Button(WIDTH // 2 + 10, HEIGHT // 2 + 60, 180, 45, "Play Manually", button_font)
 
 # Save-prompt buttons (shown in the SAVE_PROMPT overlay)
 _sp_y = HEIGHT // 2 + 20
@@ -972,6 +983,7 @@ running = True
 while running:
     dt = clock.tick(60) / 1000.0
     academic_dashboard.update(dt)
+    stats_dashboard.update(dt)
     
     remaining_hours = DAY_END - time_of_day
 
@@ -982,9 +994,7 @@ while running:
     # Button enable state
     if day_over or remaining_hours <= 0:
         for btn in game_buttons:
-            if btn != stats_btn:
-                btn.enabled = False
-        stats_btn.enabled = True
+            btn.enabled = False
     else:
         study_btn.enabled = student.action_status['study'] and remaining_hours > 0
         sleep_btn.enabled = student.action_status['sleep'] and remaining_hours > 0
@@ -1032,7 +1042,11 @@ while running:
         if lab_assessment_result_box.handle_event(event):
             continue
 
-        # Academic dashboard expansion/collapse
+        # Stats dashboard expansion/collapse (left panel - checked first)
+        if stats_dashboard.handle_event(event):
+            continue
+
+        # Academic dashboard expansion/collapse (right panel)
         if academic_dashboard.handle_event(event):
             continue
 
@@ -1050,6 +1064,7 @@ while running:
                     exam_idx=_exam_idx,
                     exam_copy_to_all=_exam_copy_to_all,
                     exam_prep_actions=_exam_prep_actions,
+                    pre_mid_week_template=_pre_mid_week_template
                 )
                 running = False
             if save_no_btn.clicked(event):
@@ -1093,6 +1108,7 @@ while running:
                     _exam_idx = loaded.get("exam_idx", 0)
                     _exam_copy_to_all = loaded.get("exam_copy_to_all", False)
                     _exam_prep_actions[:] = loaded.get("exam_prep_actions", [])
+                    _pre_mid_week_template[:] = loaded.get("pre_mid_week_template", [])
                     copy_all_checkbox.checked = _exam_copy_to_all
                     # Reconstruct _exam_schedule from course_manager
                     if _exam_period_type == "mid":
@@ -1320,9 +1336,6 @@ while running:
                     time_of_day += 0.5  # 30 minutes
                     print(f"Time of day: {format_time(time_of_day)}")
                     _check_day_end(new_messages)
-
-                if stats_btn.clicked(event):
-                    academic_dashboard.expanded = not academic_dashboard.expanded
 
             if new_messages:
                 messages.extend(new_messages)
@@ -1564,9 +1577,6 @@ while running:
                     messages = []
 
             else:
-                if stats_btn.clicked(event):
-                    academic_dashboard.expanded = not academic_dashboard.expanded
-
                 if continue_btn.clicked(event):
                     replay_runner = None
                     week_replay_runner = None
@@ -1579,6 +1589,16 @@ while running:
                         _exam_prep_actions[:] = list(day_actions)
                     # Save or reset week_actions based on current day
                     if day_in_week == 7:      # completed last day of the week
+                        # Feature 1: Overwrite template with this week's full pattern.
+                        # We only need the last pre-mid week (week 7) as a flat list of
+                        # day-action-lists — exactly what WeekReplayRunner expects.
+                        if week_count <= 7:
+                            _full_week = list(week_actions) + [list(day_actions)]
+                            while len(_full_week) < 7:
+                                _full_week.append([])
+                            _pre_mid_week_template[:] = [list(d) for d in _full_week]
+
+                        student.reset_week_snapshots()  # Reset trends for the new week
                         week_actions.clear()  # fresh start for next week
                     else:
                         week_actions.append(list(day_actions))  # save for week replay
@@ -1609,6 +1629,14 @@ while running:
                         _exam_copy_to_all = False
                         _exam_prep_actions.clear()
                         copy_all_checkbox.checked = False
+                        # Save week-7 pattern as template for post-mid lifestyle repeat
+                        # week_actions was cleared above (day_in_week==7 path), so we use the
+                        # snapshot we took just before: week_actions + day_actions from this day.
+                        # At this point day_actions was already cleared too, so we need the
+                        # snapshot we saved before clearing. Re-capture from what we know:
+                        # The template was appended above in the day_in_week==7 block,
+                        # so _pre_mid_week_template[-1] holds the full week-7 snapshot.
+                        # Nothing more to do — it was captured in the block above.
                         current_screen_state = EXAM_SCREEN
                     elif week_count < 16 and new_wk >= 16 and _exam_period_type == "":  # crossed into final-exam period (first time only)
                         course_manager.generate_final_schedule()
@@ -1785,10 +1813,10 @@ while running:
         # Midterm Results Screen
         elif current_screen_state == MIDTERM_RESULTS_SCREEN:
             if exam_continue_btn.clicked(event):
-                # Return to game for the post-midterm half — resume at Monday morning, Week 8
-                day_count = 50       # Day 50 = Week 8 Monday
-                time_of_day = 8.0    # 8:00 AM
-                day_over = False
+                # Clear exam period state so day-detection and exam-label logic don't re-fire
+                day_count   = 64       # Day 64 = Week 10 Monday (after weeks 8-9 exams)
+                time_of_day = 8.0
+                day_over    = False
                 current_game_bg = bg_map['default']
                 daily_outages = wifi_failure_event()
                 todays_classes.clear()
@@ -1796,10 +1824,54 @@ while running:
                 _quizzes_resolved_today.clear()
                 _lab_assessments_resolved_today.clear()
                 class_interrupt_box.attend_all = False
-                # Clear exam period so day-detection doesn't re-fire
                 _exam_period_type = ""
                 _exam_idx = 0
                 _exam_schedule.clear()
+                student.reset_week_snapshots()
+                if _pre_mid_week_template:
+                    current_screen_state = POST_MID_CHOICE_SCREEN
+                else:
+                    current_screen_state = GAME_SCREEN
+
+        # Post-Mid Choice Screen (Feature 1)
+        elif current_screen_state == POST_MID_CHOICE_SCREEN:
+            if post_mid_repeat_btn.clicked(event):
+                # _pre_mid_week_template is a flat 2D list of day-action-lists (week 7 pattern).
+                # Post-mid class weeks are 10-15 = 6 weeks.
+                # Midterm exam weeks (8-9) are already done; day 64 = Week 10 Monday.
+                # start_day=63 (end of week 9 Sunday) so runner's first day becomes 64.
+                # start_week=9 so runner's first current_week is 10.
+                _style = list(_pre_mid_week_template) if _pre_mid_week_template else []
+
+                week_replay_runner = WeekReplayRunner(
+                    student, course_manager,
+                    _style,
+                    n_weeks=6,        # weeks 10, 11, 12, 13, 14, 15
+                    start_day=63,
+                    start_week=9
+                )
+                week_actions.clear()
+                week_actions.extend([list(d) for d in _style])
+
+                # Check if week 10 has assessments before starting
+                assessments = week_replay_runner.get_next_week_assessments()
+                if assessments:
+                    week_replay_runner.quiz_week_pending = True
+                    week_replay_runner.msgs.append(
+                        f"Week {week_replay_runner.current_week} begins but has assessments scheduled."
+                    )
+                    quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
+                else:
+                    week_replay_runner._start_new_day()
+                    week_replay_runner.msgs.append(
+                        f"Week {week_replay_runner.current_week} begins (pre-mid style replay)."
+                    )
+                messages = ["Replaying pre-mid lifestyle for weeks 10–15..."]
+                current_screen_state = DAY_END_SCREEN
+
+            if post_mid_manual_btn.clicked(event):
+                # day_count/time_of_day/exam state already reset in MIDTERM_RESULTS handler
+                messages = ["Starting post-midterm half manually. Good luck!"]
                 current_screen_state = GAME_SCREEN
 
         # Semester End Screen
@@ -1924,8 +1996,10 @@ while running:
                 quiz_week_prompt_box.open(week_replay_runner.current_week, assessments)
             # Check for exam milestone after week replay finishes
             if week_replay_runner.done and not week_replay_runner.burnout_occurred:
+                # Use last_completed_week: current_week may already be incremented past the milestone
+                _runner_final_week = week_replay_runner.last_completed_week
                 # Runner stops at end-of-Sunday for week 7 (pre-mid) or week 15 (pre-finals)
-                if week_count == 7 and _exam_period_type == "":
+                if _runner_final_week == 7 and _exam_period_type == "":
                     course_manager.generate_midterm_schedule()
                     _exam_schedule[:] = course_manager.midterm_schedule
                     _exam_idx = 0
@@ -1933,14 +2007,17 @@ while running:
                     _exam_copy_to_all = False
                     _exam_prep_actions.clear()
                     copy_all_checkbox.checked = False
-                    
+
+                    # Save week-7 template for potential post-mid replay (replay-runner path)
+                    _pre_mid_week_template[:] = [list(d) for d in week_replay_runner.week_actions]
+
                     # Advance to Monday morning so action buttons aren't disabled at End of Day
                     day_count += 1
                     time_of_day = 8.0
                     day_over = False
-                    
+
                     current_screen_state = EXAM_SCREEN
-                elif week_count == 15 and _exam_period_type == "":
+                elif _runner_final_week == 15 and _exam_period_type == "":
                     course_manager.generate_final_schedule()
                     _exam_schedule[:] = course_manager.final_schedule
                     _exam_idx = 0
@@ -1948,7 +2025,7 @@ while running:
                     _exam_copy_to_all = False
                     _exam_prep_actions.clear()
                     copy_all_checkbox.checked = False
-                    
+
                     # Advance to Monday morning
                     day_count += 1
                     time_of_day = 8.0
@@ -2060,6 +2137,7 @@ while running:
             draw_clock(screen, clock_font, date_font, time_of_day, day_count, bar_space,
                        week_count=week_count, day_in_week=day_in_week)
             academic_dashboard.draw(screen, course_manager, week_count)
+            stats_dashboard.draw(screen, student, day_count, week_count=week_count)
         elif _last_game_screen == DAY_END_SCREEN:
             avg_k = course_manager.get_average_knowledge()
             day_end_screen(
@@ -2076,6 +2154,7 @@ while running:
                 sick_active=sick_active,
             )
             academic_dashboard.draw(screen, course_manager, week_count)
+            stats_dashboard.draw(screen, student, day_count, week_count=week_count)
         save_prompt_screen(screen, save_yes_btn, save_no_btn, message_font)
 
     elif current_screen_state == MAIN_MENU:
@@ -2123,8 +2202,10 @@ while running:
         alert_box.draw(screen)
         class_interrupt_box.draw(screen)
 
-        # Draw academic dashboard (behind quiz popup)
+        # Draw academic dashboard (right, behind quiz popup)
         academic_dashboard.draw(screen, course_manager, week_count)
+        # Draw stats dashboard (left, same z-level)
+        stats_dashboard.draw(screen, student, day_count)
 
         # Draw quiz result popup (topmost)
         quiz_result_box.draw(screen)
@@ -2158,8 +2239,8 @@ while running:
             sick_active=sick_active,
             exam_week_label=_de_week_label,
         )
-        stats_btn.draw(screen)
         academic_dashboard.draw(screen, course_manager, week_count)
+        stats_dashboard.draw(screen, student, day_count)
         quiz_week_prompt_box.draw(screen)
         quiz_interrupt_box.draw(screen)   # replay quiz Take/Skip prompt
         lab_assessment_interrupt_box.draw(screen)  # replay lab Take/Skip prompt
@@ -2219,6 +2300,9 @@ while running:
             from screens import semester_optimal_screen
             _results_content_h = semester_optimal_screen(
                 screen, _optimal_data, sem_prev_btn, sem_quit_btn, scroll_y=_results_scroll_y)
+
+    elif current_screen_state == POST_MID_CHOICE_SCREEN:
+        post_mid_choice_screen(screen, post_mid_repeat_btn, post_mid_manual_btn, message_font)
 
     pygame.display.flip()
 

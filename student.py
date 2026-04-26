@@ -42,6 +42,26 @@ class Student:
         self._SICKNESS_MAX_PROB  = 0.10   # hard cap at 10%
         self._RECOVERY_PROB      = 0.40   # 40% chance to recover each sick day (~2.5 day expected illness)
 
+        # Weekly snapshots (reset at start of each week, one entry per day)
+        self._week_stress_snapshots:     list[float] = []
+        self._week_health_snapshots:     list[float] = []
+        self._week_motivation_snapshots: list[float] = []
+
+        # Weekly activity hours (reset at start of each week, appended during each action)
+        self._week_study_hours:  list[float] = []  # per-day total
+        self._week_sleep_hours:  list[float] = []
+        self._week_relax_hours:  list[float] = []
+        self._week_class_hours:  list[float] = []
+
+        # Today's accumulators (reset at end_of_day, used to build weekly lists)
+        self._today_study_hours: float = 0.0
+        self._today_sleep_hours: float = 0.0
+        self._today_relax_hours: float = 0.0
+        self._today_class_hours: float = 0.0
+
+        # Track which week's data the snapshots belong to
+        self._snapshot_week: int = 0
+
         # Action rates
         self.study_knowledge_rate = 0.8 * type_mult
         self.study_sleep_rate =  12    
@@ -212,6 +232,20 @@ class Student:
         if self.burnout_days_remaining > 0:
             self.stats["days_burnt_out"] += 1
 
+        # Append to weekly snapshots
+        self._week_stress_snapshots.append(self.stress)
+        self._week_health_snapshots.append(self.health)
+        self._week_motivation_snapshots.append(self.motivation)
+        self._week_study_hours.append(self._today_study_hours)
+        self._week_sleep_hours.append(self._today_sleep_hours)
+        self._week_relax_hours.append(self._today_relax_hours)
+        self._week_class_hours.append(self._today_class_hours)
+        # Reset today's accumulators
+        self._today_study_hours = 0.0
+        self._today_sleep_hours = 0.0
+        self._today_relax_hours = 0.0
+        self._today_class_hours = 0.0
+
         # Sickness logic 
         # Always record today before checking onset so history is up-to-date
         self._record_daily_history()
@@ -260,6 +294,20 @@ class Student:
         messages.extend(self.clamp())
         return messages
 
+    def reset_week_snapshots(self):
+        """Call at the start of each new week to clear per-week trend data."""
+        self._week_stress_snapshots.clear()
+        self._week_health_snapshots.clear()
+        self._week_motivation_snapshots.clear()
+        self._week_study_hours.clear()
+        self._week_sleep_hours.clear()
+        self._week_relax_hours.clear()
+        self._week_class_hours.clear()
+        self._today_study_hours = 0.0
+        self._today_sleep_hours = 0.0
+        self._today_relax_hours = 0.0
+        self._today_class_hours = 0.0
+
     def attend_class(self, course, week, avg_knowledge=0.0):
         messages = []
         if not self.action_status['attend_class']:
@@ -278,6 +326,7 @@ class Student:
         self.attendance += 1
         self.stats["classes_attended"] += 1
         self.stats["hours_in_class"] += 1.25
+        self._today_class_hours += 1.25   # each class slot = 75 min = 1.25 h
         knowledge_gain = (75.0 / max(1, course.total_classes)) * self.type_mult
         course.add_knowledge(knowledge_gain)
         
@@ -319,6 +368,7 @@ class Student:
         self.health -= hours * self.study_health_rate
 
         self.stats["hours_studied"] += hours
+        self._today_study_hours += hours
         
         messages.append(f"Studied {course.name} ({hours:.1f}h): +{gain:.1f} knowledge, -{hours * self.study_sleep_rate:.1f} sleep, +{hours * self.study_stress_rate:.1f} stress.")
 
@@ -336,6 +386,7 @@ class Student:
         self.stress -= hours * self.rest_stress_rate
         self.health += hours * self.rest_health_rate
         self.stats["hours_slept"] += hours
+        self._today_sleep_hours += hours
         
         messages.append(f"Slept ({hours:.1f}h): +{hours*self.rest_sleep_rate:.1f} sleep, -{hours*self.rest_stress_rate:.1f} stress.")
 
@@ -402,6 +453,7 @@ class Student:
         self.motivation += hours * self.relax_motivation_rate
         self.health += hours * self.relax_health_rate   # relaxing restores health
         self.stats["hours_relaxed"] += hours
+        self._today_relax_hours += hours
 
         messages.append(f"Relaxed ({hours:.1f}h): -{hours*self.relax_stress_rate:.1f} stress, -{hours*self.relax_sleep_rate:.1f} sleep.")
         messages.extend(self.clamp())

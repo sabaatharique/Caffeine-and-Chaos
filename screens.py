@@ -351,6 +351,56 @@ def midterm_results_screen(screen, course_manager, continue_btn, scroll_y=0):
 
 
 
+
+def post_mid_choice_screen(screen, repeat_btn, manual_btn, font):
+    """
+    After midterm results, ask the player whether to replay the pre-mid
+    lifestyle pattern for the remaining post-mid weeks, or play manually.
+    """
+    WIDTH, HEIGHT = screen.get_width(), screen.get_height()
+
+    # Dim overlay
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 210))
+    screen.blit(overlay, (0, 0))
+
+    # Card
+    card_w, card_h = 540, 280
+    card_x = (WIDTH  - card_w) // 2
+    card_y = (HEIGHT - card_h) // 2 - 20
+    card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_surf.fill((20, 20, 45, 235))
+    screen.blit(card_surf, (card_x, card_y))
+    pygame.draw.rect(screen, (100, 80, 220),
+                     (card_x, card_y, card_w, card_h), 2, border_radius=10)
+
+    # Title
+    title_font = pygame.font.Font("assets/fonts/Papernotes.otf", 30)
+    title_surf = title_font.render("Post-Midterm Plan", True, (255, 220, 80))
+    screen.blit(title_surf,
+                (card_x + card_w // 2 - title_surf.get_width() // 2, card_y + 24))
+
+    # Body lines
+    lines = [
+        "Midterms are done. What's your plan for the rest of the semester?",
+        "",
+        "  Repeat Pre-Mid Style  →  automatically replays your pre-mid week",
+        "  pattern (actions, hours, courses) for all remaining class weeks.",
+        "  Quizzes and labs will still interrupt for you to decide.",
+        "",
+        "  Play Manually  →  you control every day as usual.",
+    ]
+    body_font = pygame.font.Font("assets/fonts/Papernotes.otf", 17)
+    y = card_y + 74
+    for line in lines:
+        surf = body_font.render(line, True, (210, 205, 235))
+        screen.blit(surf, (card_x + 20, y))
+        y += surf.get_height() + 3
+
+    repeat_btn.draw(screen)
+    manual_btn.draw(screen)
+
+
 # Exam Period Screens
 
 def exam_schedule_screen(screen, exam_type: str, schedule: list, continue_btn, font) -> None:
